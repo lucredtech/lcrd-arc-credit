@@ -19,8 +19,8 @@
   <main class="wrap">
     <p class="banner" id="banner" role="alert" hidden></p>
     <section class="hero">
-      <h1>Unsecured USDC credit, priced on-chain from a credit score.</h1>
-      <p class="lede">LCRD scores a borrower's real financial activity. The contract turns that score into a tier, an APR and a credit limit with a published formula anyone can check, and records every repayment so good borrowers pay less and can borrow more over time. Only a hash of the score report is on-chain, never personal data.</p>
+      <h1>USDC credit on Arc, priced on-chain. Two ways in.</h1>
+      <p class="lede">Have a Stellar DeFi history? LCRD scores it and, for strong scores, opens an unsecured line automatically. No history? Deposit USDC and borrow against it. Either way the contract prices the line with a published formula anyone can check and records every repayment, so good borrowers pay less and can borrow more. No personal data on-chain.</p>
       <div class="stats">
         <div class="stat"><span class="n" id="s-assets">–</span><span class="l">pool value (USDC)</span></div>
         <div class="stat"><span class="n" id="s-cash">–</span><span class="l">available to lend</span></div>
@@ -42,9 +42,10 @@
       </div>
       <div class="card">
         <h2>Borrow</h2>
-        <p class="hint">Unsecured: no collateral. Only wallets with a line from the underwriter can draw. Interest accrues by the second; repayments go to interest first.</p>
+        <p class="hint">Draw on your line: unsecured (from your LCRD score) or secured (against your own deposit). Interest accrues by the second; repayments go to interest first.</p>
         <div class="kv"><span>Your line</span><b id="my-line">connect a wallet</b></div>
         <div class="kv"><span>LCRD score</span><b id="my-score">–</b></div>
+        <div class="kv"><span>Your deposit</span><b id="my-collateral">–</b></div>
         <div class="kv"><span>Repayment record</span><b id="my-history">–</b></div>
         <div class="kv"><span>You owe</span><b id="my-owed">–</b></div>
         <div class="kv"><span>Available to draw</span><b id="my-avail">–</b></div>
@@ -55,15 +56,21 @@
       </div>
     </section>
     <section class="card apply" id="apply-card" hidden>
-      <h2>Get a credit line</h2>
-      <p class="hint">No forms. LCRD scores your Stellar wallet's on-chain history and, if you qualify, opens a line for this Arc wallet automatically. You sign one message with each wallet to prove both are yours; nothing moves between chains and no personal data goes on-chain. Automatic lines are capped at 1 USDC while the pool is small.</p>
-      <ol class="steps">
-        <li>Connect this Arc wallet (top right).</li>
-        <li>Have <a href="https://www.freighter.app/" target="_blank" rel="noopener">Freighter</a> installed with the Stellar wallet you use for DeFi.</li>
-        <li>Sign two messages: one in your Arc wallet, one in Freighter.</li>
-      </ol>
-      <div class="row"><button data-act="apply">Check my score and request a line</button></div>
-      <p class="next" id="apply-result"></p>
+      <h2>Get a credit line: two ways to qualify</h2>
+      <div class="routes">
+        <div class="route">
+          <h3>1 · Provide liquidity <span class="tag">secured · no score needed</span></h3>
+          <p class="hint">Deposit USDC in the pool, then borrow up to 71.25% of it. Your deposit keeps earning; the part backing your loan is locked until you repay. 15% APR with no score, cheaper with every completed repayment. Best if you have no on-chain history yet: it builds one.</p>
+          <p class="next" id="secure-info"></p>
+          <div class="row"><button data-act="secure">Open a secured line</button></div>
+        </div>
+        <div class="route">
+          <h3>2 · Use your Stellar wallet <span class="tag ok">unsecured</span></h3>
+          <p class="hint">LCRD scores your Stellar DeFi history. Tier A, or a score of 55+ in tier B, gets an unsecured line opened automatically (capped at 1 USDC while the pool is small). Sign one message with this Arc wallet and one with <a href="https://www.freighter.app/" target="_blank" rel="noopener">Freighter</a> to prove both are yours; nothing moves between chains.</p>
+          <div class="row"><button data-act="apply">Check my score and request a line</button></div>
+          <p class="next" id="apply-result"></p>
+        </div>
+      </div>
     </section>
     <section class="card uw" id="uw-card" hidden>
       <h2>Underwriter</h2>
@@ -85,18 +92,18 @@
         <div class="card">
           <h3>1 · The score (0–100), off-chain</h3>
           <p>LCRD reads a borrower's real financial behaviour: completed borrow-and-repay cycles where they exist, otherwise activity (protocols used, volume, active days, length of track record) plus income signals. The report is hashed; only the hash goes on-chain, so no personal data does.</p>
-          <p class="mono-sm">Tier A 67–100 · Tier B 34–66 · Tier C 0–33</p>
+          <p class="mono-sm">Tier A 67–100 · Tier B 34–66 · Tier C 0–33<br>Unsecured: tier A, or tier B with 55+<br>Secured (against your deposit): no score needed</p>
         </div>
         <div class="card">
           <h3>2 · The price, on-chain</h3>
           <p>The contract computes the APR from the score with LCRD's published policy; nobody can quote a borrower a different rate.</p>
-          <p class="mono-sm">APR = 8% cost of funds<br>+ score premium: 20% at score 0 → 3% at score 100<br>+ 3% unsecured surcharge<br>− 0.5% per completed cycle (up to 2%)<br>kept between 6% and 36%</p>
+          <p class="mono-sm">Unsecured APR = 8% cost of funds<br>+ score premium: 20% at score 0 → 3% at 100<br>+ 3% unsecured surcharge<br>Secured APR = 8% + 35% of the score premium<br>(15% with no score)<br>Both: − 0.5% per completed cycle (up to 2%),<br>kept between 6% and 36%</p>
           <p>Example: score 71 → 8% + 7.93% + 3% = <b>18.93%</b>. Check any score with <code>quote(score, cycles)</code>.</p>
         </div>
         <div class="card">
           <h3>3 · Repayments build credit</h3>
           <p>Every repayment is recorded on-chain. A cycle completes when a loan using at least 25% of the line, held at least 7 days, is repaid in full. Each completed cycle cuts the APR by 0.5% automatically and lets the line grow by another starter amount.</p>
-          <p class="mono-sm">Starter line: A 100 USDC · B 75 USDC · C none<br>Ceiling: A 2,500 USDC · B 250 USDC<br>A write-off resets completed cycles to zero</p>
+          <p class="mono-sm">Unsecured starter: A 100 USDC · B (55+) 75 USDC<br>Ceiling: A 2,500 USDC · B 250 USDC<br>Secured: up to 71.25% of your deposit<br>A default resets completed cycles to zero</p>
         </div>
       </div>
     </section>
@@ -105,8 +112,8 @@
       <h2>Credit lines</h2>
       <p class="hint">Every line on the contract, with its on-chain repayment record. The score reference is the keccak-256 hash of the LCRD score report that justified the line.</p>
       <div class="table-wrap"><table id="lines">
-        <thead><tr><th>Borrower</th><th class="num">Score</th><th>Tier</th><th class="num">Limit</th><th class="num">APR</th><th class="num">Principal</th><th class="num">Interest</th><th class="num">Repayments · cycles</th><th>Score ref</th><th>Status</th></tr></thead>
-        <tbody><tr><td colspan="10" class="empty">Loading…</td></tr></tbody>
+        <thead><tr><th>Borrower</th><th>Type</th><th class="num">Score</th><th>Tier</th><th class="num">Limit</th><th class="num">APR</th><th class="num">Principal</th><th class="num">Interest</th><th class="num">Repayments · cycles</th><th>Score ref</th><th>Status</th></tr></thead>
+        <tbody><tr><td colspan="11" class="empty">Loading…</td></tr></tbody>
       </table></div>
     </section>
 
@@ -123,6 +130,6 @@
     <span>MIT licensed · <a href="https://github.com/lucredtech/lcrd-arc-credit" target="_blank" rel="noopener">Source</a></span>
     <span>Arc mainnet · chain 5042 · USDC <code>0x3600…0000</code></span>
   </footer>
-  <script type="module" src="app.bundle.js?v=7"></script>
+  <script type="module" src="app.bundle.js?v=8"></script>
 </body>
 </html>

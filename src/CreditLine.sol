@@ -23,8 +23,15 @@ interface IERC20 {
 ///       + score premium, sliding linearly from 2000 at score 0 to 300 at score 100
 ///       + 300 unsecured surcharge
 ///   clamped to [600, 3600].
-/// Tiers: A = score 67-100, B = 34-66, C = 0-33. Unsecured lines are for tiers A
-/// and B only and start small: 100 USDC (A) and 75 USDC (B).
+/// Tiers: A = score 67-100, B = 34-66, C = 0-33. Unsecured lines need tier A or the
+/// upper half of tier B (score 55 or more) and start small: 100 USDC (A), 75 USDC (B).
+///
+/// Secured lines need no score: any lender can borrow against their own pool
+/// shares, up to 71.25% of their value (LCRD secured policy: 5% stablecoin haircut,
+/// then a 75% advance rate), at LCRD's secured price (8% + 35% of the score premium;
+/// 15% with no score). The shares backing the loan cannot be withdrawn until it is
+/// repaid, and on default the underwriter settles the debt from them. Repaying builds
+/// the same on-chain record, so people with no history elsewhere can start here.
 ///
 /// Repayment history is recorded on-chain per borrower and rewarded:
 ///   - a cycle is completed when a loan that used at least 25% of the line and ran
@@ -43,7 +50,8 @@ contract CreditLine {
         uint128 interest; // interest accrued and not yet repaid
         uint32 aprBps; // simple annual rate, basis points, derived from the score
         uint8 tier; // LCRD risk tier: 1 = A, 2 = B, 3 = C
-        uint8 score; // LCRD credit score, 0-100
+        uint8 score; // LCRD credit score, 0-100 (0 on a secured line with no score)
+        bool secured; // backed by the borrower's own pool shares
         bool active; // can draw; repayments are always accepted
         uint64 lastAccrued; // timestamp of the last accrual
         bytes32 scoreRef; // hash of the off-chain score report backing this line
@@ -101,6 +109,9 @@ contract CreditLine {
     uint256 public constant MAX_CYCLE_DISCOUNT_BPS = 200;
     uint256 public constant CYCLE_MIN_DURATION = 7 days;
     uint256 public constant CYCLE_MIN_USE_DIVISOR = 4; // must draw at least limit / 4
+    uint8 public constant UNSECURED_MIN_SCORE = 55; // tier A, or the upper half of tier B
+    uint256 public constant SECURED_ADVANCE_BPS = 7_125; // 95% after haircut x 75% advance
+    uint256 public constant SECURED_PREMIUM_SHARE_BPS = 3_500; // share of the score premium on secured credit
     // Virtual shares and assets blunt the first-depositor share inflation attack.
     uint256 private constant VIRTUAL_SHARES = 1e6;
     uint256 private constant VIRTUAL_ASSETS = 1;
@@ -117,6 +128,8 @@ contract CreditLine {
     event Repaid(address indexed borrower, address indexed payer, uint256 interestPaid, uint256 principalPaid);
     event WrittenOff(address indexed borrower, uint256 principal, uint256 interest);
     event CycleCompleted(address indexed borrower, uint32 cyclesCompleted, uint256 newAprBps);
+    event SecuredLineOpened(address indexed borrower, uint256 capacity, uint256 aprBps);
+    event CollateralSeized(address indexed borrower, uint256 shares, uint256 value, uint256 writtenOff);
     event UnderwriterChanged(address indexed underwriter);
     event OwnershipTransferStarted(address indexed previousOwner, address indexed newOwner);
     event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
@@ -137,6 +150,10 @@ contract CreditLine {
     error InsufficientShares();
     error NothingOwed();
     error TransferFailed();
+    error HasOpenLoan();
+    error NoCollateral();
+    error NotSecured();
+    error CollateralLocked();
 
     // ----------------------------------------------------------- modifiers --
 
@@ -200,10 +217,23 @@ contract CreditLine {
     /// @notice How much the borrower can draw right now.
     function available(address borrower) external view returns (uint256) {
         Line memory l = lines[borrower];
-        if (!l.active || l.principal >= l.limit) return 0;
-        uint256 room = l.limit - l.principal;
+        if (!l.active) return 0;
+        uint256 cap = l.secured ? securedCapacity(borrower) : l.limit;
+        uint256 debt = uint256(l.principal) + (l.secured ? l.interest + _pending(l) : 0);
+        if (debt >= cap) return 0;
+        uint256 room = cap - debt;
         uint256 c = cash();
         return room < c ? room : c;
+    }
+
+    /// @notice What a lender's shares are worth now.
+    function collateralValue(address account) public view returns (uint256) {
+        return convertToAssets(sharesOf[account]);
+    }
+
+    /// @notice The most a lender can owe on a secured line: 71.25% of their shares' value.
+    function securedCapacity(address account) public view returns (uint256) {
+        return collateralValue(account) * SECURED_ADVANCE_BPS / 10_000;
     }
 
     // ------------------------------------------------------------ lenders --
@@ -223,6 +253,12 @@ contract CreditLine {
         if (sharesOf[msg.sender] < shares) revert InsufficientShares();
         assets = convertToAssets(shares);
         if (assets > cash()) revert InsufficientLiquidity();
+        Line storage l = lines[msg.sender];
+        if (l.secured && (l.principal > 0 || l.interest > 0 || _pending(l) > 0)) {
+            _accrue(l);
+            uint256 remaining = convertToAssets(sharesOf[msg.sender] - shares) * SECURED_ADVANCE_BPS / 10_000;
+            if (remaining < uint256(l.principal) + l.interest) revert CollateralLocked();
+        }
         sharesOf[msg.sender] -= shares;
         totalShares -= shares;
         _push(msg.sender, assets);
@@ -240,7 +276,7 @@ contract CreditLine {
         if (score >= TIER_A_MIN_SCORE) (tier, starter, ceiling) = (1, TIER_A_MAX_LIMIT, TIER_A_CEILING);
         else if (score >= TIER_B_MIN_SCORE) (tier, starter, ceiling) = (2, TIER_B_MAX_LIMIT, TIER_B_CEILING);
         else tier = 3;
-        maxLimit = starter * (1 + uint256(cyclesCompleted));
+        maxLimit = score >= UNSECURED_MIN_SCORE ? starter * (1 + uint256(cyclesCompleted)) : 0;
         if (maxLimit > ceiling) maxLimit = ceiling;
 
         uint256 premium = PREMIUM_AT_0_BPS - (PREMIUM_AT_0_BPS - PREMIUM_AT_100_BPS) * score / 100;
@@ -251,6 +287,40 @@ contract CreditLine {
         if (apr < MIN_APR_BPS) apr = MIN_APR_BPS;
         if (apr > MAX_APR_BPS) apr = MAX_APR_BPS;
         aprBps = uint32(apr);
+    }
+
+    /// @notice LCRD's secured price: 8% + 35% of the score premium, less the cycle discount.
+    function securedQuote(uint8 score, uint32 cyclesCompleted) public pure returns (uint32 aprBps) {
+        if (score > 100) revert BadScore();
+        uint256 premium = PREMIUM_AT_0_BPS - (PREMIUM_AT_0_BPS - PREMIUM_AT_100_BPS) * score / 100;
+        uint256 discount = uint256(cyclesCompleted) * CYCLE_DISCOUNT_BPS;
+        if (discount > MAX_CYCLE_DISCOUNT_BPS) discount = MAX_CYCLE_DISCOUNT_BPS;
+        uint256 apr = BASE_BPS + premium * SECURED_PREMIUM_SHARE_BPS / 10_000;
+        apr = apr > discount ? apr - discount : 0;
+        if (apr < MIN_APR_BPS) apr = MIN_APR_BPS;
+        if (apr > MAX_APR_BPS) apr = MAX_APR_BPS;
+        aprBps = uint32(apr);
+    }
+
+    /// @notice Open (or reprice) a secured line against your own pool shares. No score needed;
+    /// a score you already have on file lowers the price.
+    function openSecuredLine() external {
+        if (sharesOf[msg.sender] == 0) revert NoCollateral();
+        Line storage l = lines[msg.sender];
+        if (!l.secured && (l.principal > 0 || l.interest > 0)) revert HasOpenLoan();
+        if (l.lastAccrued == 0) {
+            borrowers.push(msg.sender);
+            l.lastAccrued = uint64(block.timestamp);
+        } else {
+            _accrue(l);
+        }
+        uint32 aprBps = securedQuote(l.score, history[msg.sender].cyclesCompleted);
+        uint256 cap = securedCapacity(msg.sender);
+        l.secured = true;
+        l.active = true;
+        l.aprBps = aprBps;
+        l.limit = uint128(cap);
+        emit SecuredLineOpened(msg.sender, cap, aprBps);
     }
 
     /// @notice Open or update a borrower's line from their LCRD score. The contract derives the
@@ -264,12 +334,14 @@ contract CreditLine {
         if (maxLimit == 0) revert TierNotEligible();
         if (limit > maxLimit) revert OverLimit();
         Line storage l = lines[borrower];
+        if (l.secured && (l.principal > 0 || l.interest > 0 || _pending(l) > 0)) revert HasOpenLoan();
         if (l.lastAccrued == 0) {
             borrowers.push(borrower);
             l.lastAccrued = uint64(block.timestamp);
         } else {
             _accrue(l);
         }
+        l.secured = false;
         l.limit = limit;
         l.aprBps = aprBps;
         l.tier = tier;
@@ -307,6 +379,43 @@ contract CreditLine {
         emit WrittenOff(borrower, principal, interest);
     }
 
+    /// @notice Settle a defaulted secured line from the borrower's own shares. Anything the
+    /// shares cannot cover is written off. Recorded as a write-off in the borrower's history.
+    function seizeCollateral(address borrower) external onlyUnderwriter nonReentrant {
+        Line storage l = lines[borrower];
+        if (!l.secured) revert NotSecured();
+        _accrue(l);
+        uint256 interestDue = l.interest;
+        uint256 principalDue = l.principal;
+        uint256 debt = interestDue + principalDue;
+        if (debt == 0) revert NothingOwed();
+
+        // Shares worth the debt, rounded up, but no more than the borrower holds.
+        uint256 needed = (debt * (totalShares + VIRTUAL_SHARES) + (totalAssets() + VIRTUAL_ASSETS) - 1) / (totalAssets() + VIRTUAL_ASSETS);
+        uint256 take = needed < sharesOf[borrower] ? needed : sharesOf[borrower];
+        uint256 value = convertToAssets(take);
+        if (value > debt) value = debt;
+        sharesOf[borrower] -= take;
+        totalShares -= take;
+
+        uint256 toInterest = value < interestDue ? value : interestDue;
+        uint256 toPrincipal = value - toInterest;
+        uint256 leftover = principalDue - toPrincipal; // uncovered principal: a loss to the pool
+        totalPrincipal -= principalDue;
+        totalRepaidInterest += toInterest;
+        totalWrittenOff += leftover;
+
+        l.principal = 0;
+        l.interest = 0;
+        l.active = false;
+        History storage h = history[borrower];
+        h.writeOffs += 1;
+        h.cyclesCompleted = 0;
+        h.cycleStart = 0;
+        h.cyclePeak = 0;
+        emit CollateralSeized(borrower, take, value, leftover);
+    }
+
     // ---------------------------------------------------------- borrowers --
 
     function borrow(uint256 amount) external nonReentrant {
@@ -314,7 +423,13 @@ contract CreditLine {
         Line storage l = lines[msg.sender];
         if (!l.active) revert LineInactive();
         _accrue(l);
-        if (uint256(l.principal) + amount > l.limit) revert OverLimit();
+        if (l.secured) {
+            uint256 cap = securedCapacity(msg.sender);
+            if (uint256(l.principal) + l.interest + amount > cap) revert OverLimit();
+            l.limit = uint128(cap); // snapshot, used by the cycle rule and shown in the app
+        } else if (uint256(l.principal) + amount > l.limit) {
+            revert OverLimit();
+        }
         if (amount > cash()) revert InsufficientLiquidity();
         History storage h = history[msg.sender];
         if (h.firstBorrowAt == 0) h.firstBorrowAt = uint64(block.timestamp);
@@ -366,7 +481,9 @@ contract CreditLine {
             h.cyclePeak = 0;
             if (qualifies) {
                 h.cyclesCompleted += 1;
-                (, uint32 aprBps,) = quote(l.score, h.cyclesCompleted);
+                uint32 aprBps;
+                if (l.secured) aprBps = securedQuote(l.score, h.cyclesCompleted);
+                else (, aprBps,) = quote(l.score, h.cyclesCompleted);
                 l.aprBps = aprBps;
                 emit CycleCompleted(borrower, h.cyclesCompleted, aprBps);
             }

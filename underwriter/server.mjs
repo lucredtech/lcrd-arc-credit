@@ -142,8 +142,8 @@ async function requestLine(body) {
   const result = { stellar, arc: arcAddress, score, tier: ["", "A", "B", "C"][tier], path: scored.path, aprBps: Number(aprBps) }
   if (maxLimit === 0n) {
     const reason = scored.path === "no-history"
-      ? "LCRD found no DeFi history for this Stellar wallet yet, so there is nothing to score. Use a wallet with lending or DeFi activity on Stellar."
-      : `Score ${score} is tier C: LCRD policy does not offer unsecured credit below a score of 34 yet. More on-chain activity and repayments raise the score.`
+      ? "LCRD found no DeFi history for this Stellar wallet, so there is nothing to score yet. You can still qualify through the pool: deposit USDC and borrow against it (secured line), which builds your on-chain record."
+      : `Score ${score} (tier ${result.tier}). Unsecured credit needs tier A or a score of 55 or more in tier B. You can still qualify through the pool: deposit USDC and borrow against it (secured line), which builds your on-chain record.`
     return { ...result, eligible: false, reason }
   }
 

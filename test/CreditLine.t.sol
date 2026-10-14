@@ -90,10 +90,14 @@ contract CreditLineTest is Test {
         assertEq(tier, 1);
         assertEq(apr, 1_400);
 
-        (tier, apr, maxLimit) = pool.quote(50, 0);
-        assertEq(tier, 2); // B
-        assertEq(apr, 2_250); // 800 + 1150 + 300
+        (tier, apr, maxLimit) = pool.quote(60, 0);
+        assertEq(tier, 2); // B, upper half
+        assertEq(apr, 2_080); // 800 + (2000 - 1020) + 300
         assertEq(maxLimit, 75 * USDC);
+
+        (tier, apr, maxLimit) = pool.quote(50, 0);
+        assertEq(tier, 2); // B, lower half: priced, but no unsecured line
+        assertEq(maxLimit, 0);
 
         (tier, apr, maxLimit) = pool.quote(20, 0);
         assertEq(tier, 3); // C
@@ -124,7 +128,8 @@ contract CreditLineTest is Test {
 
     function test_SetLineDerivesTierAndApr() public {
         _open(50 * USDC, 71);
-        (uint128 limit,,, uint32 apr, uint8 tier, uint8 score, bool active,,) = pool.lines(alice);
+        (uint128 limit,,, uint32 apr, uint8 tier, uint8 score, bool secured, bool active,,) = pool.lines(alice);
+        assertFalse(secured);
         assertEq(limit, 50 * USDC);
         assertEq(apr, 1_893);
         assertEq(tier, 1);
@@ -141,7 +146,7 @@ contract CreditLineTest is Test {
     function test_RevertLimitAboveTierCap() public {
         vm.prank(underwriter);
         vm.expectRevert(CreditLine.OverLimit.selector);
-        pool.setLine(alice, 50, uint128(76 * USDC), SCORE); // tier B cap is 75
+        pool.setLine(alice, 60, uint128(76 * USDC), SCORE); // tier B cap is 75
     }
 
     function test_RevertScoreAbove100() public {
@@ -310,7 +315,7 @@ contract CreditLineTest is Test {
     }
 
     function testFuzz_RepayNeverTakesMoreThanOwed(uint96 borrowAmt, uint96 payAmt, uint32 elapsed, uint8 score) public {
-        score = uint8(bound(score, 34, 100));
+        score = uint8(bound(score, 55, 100));
         borrowAmt = uint96(bound(borrowAmt, 1, 75 * USDC));
         payAmt = uint96(bound(payAmt, 1, 5_000 * USDC));
         _fund(1_000 * USDC);
@@ -358,7 +363,7 @@ contract CreditLineTest is Test {
         pool.repay(p + i);
         (, uint32 cycles,,,,,,,) = pool.history(alice);
         assertEq(cycles, 1);
-        (,,, uint32 apr,,,,,) = pool.lines(alice);
+        (,,, uint32 apr,,,,,,) = pool.lines(alice);
         assertEq(apr, 1_350); // 50 bps cheaper, applied automatically
         // ... and the line may now grow: tier A maximum is two starter amounts.
         (,, uint256 maxLimit) = pool.quote(100, 1);
@@ -417,7 +422,114 @@ contract CreditLineTest is Test {
         assertEq(maxLimit, 1_100 * USDC); // 100 * (1 + 10), under the 2,500 ceiling
         (, apr, maxLimit) = pool.quote(100, 40);
         assertEq(maxLimit, 2_500 * USDC); // ceiling
-        (,, maxLimit) = pool.quote(50, 10);
+        (,, maxLimit) = pool.quote(60, 10);
         assertEq(maxLimit, 250 * USDC); // tier B ceiling
+    }
+
+    // ---- secured lines (route 1: provide liquidity) ----
+
+    function _secured(uint256 deposit) internal {
+        vm.startPrank(alice);
+        pool.deposit(deposit);
+        pool.openSecuredLine();
+        vm.stopPrank();
+    }
+
+    function test_UnsecuredNeedsScore55() public {
+        vm.prank(underwriter);
+        vm.expectRevert(CreditLine.TierNotEligible.selector);
+        pool.setLine(alice, 54, uint128(1 * USDC), SCORE);
+        vm.prank(underwriter);
+        pool.setLine(alice, 55, uint128(1 * USDC), SCORE);
+    }
+
+    function test_SecuredLineNeedsNoScore() public {
+        _fund(1_000 * USDC);
+        _secured(100 * USDC);
+        (,,, uint32 apr,, uint8 score, bool secured, bool active,,) = pool.lines(alice);
+        assertTrue(secured);
+        assertTrue(active);
+        assertEq(score, 0);
+        assertEq(apr, 1_500); // 8% + 35% of the 20% premium
+        assertApproxEqAbs(pool.available(alice), 71.25e6, 2);
+        vm.prank(alice);
+        pool.borrow(70 * USDC);
+        vm.prank(alice);
+        vm.expectRevert(CreditLine.OverLimit.selector);
+        pool.borrow(2 * USDC);
+    }
+
+    function test_SecuredRequiresDeposit() public {
+        vm.prank(alice);
+        vm.expectRevert(CreditLine.NoCollateral.selector);
+        pool.openSecuredLine();
+    }
+
+    function test_CollateralLockedWhileOwing() public {
+        _fund(1_000 * USDC);
+        _secured(100 * USDC);
+        vm.prank(alice);
+        pool.borrow(50 * USDC);
+        uint256 shares = pool.sharesOf(alice);
+        vm.prank(alice);
+        vm.expectRevert(CreditLine.CollateralLocked.selector);
+        pool.withdraw(shares);
+        // can withdraw the part not backing the loan: keep >= 50 / 0.7125 = 70.2 USDC
+        vm.prank(alice);
+        pool.withdraw(shares / 4); // leaves ~75 USDC of collateral
+        // after repaying, everything is free again
+        (uint256 p, uint256 i) = pool.owed(alice);
+        vm.prank(alice);
+        pool.repay(p + i);
+        uint256 rest = pool.sharesOf(alice);
+        vm.prank(alice);
+        pool.withdraw(rest);
+        assertEq(pool.sharesOf(alice), 0);
+    }
+
+    function test_SeizeCollateralSettlesDefault() public {
+        _fund(1_000 * USDC);
+        _secured(100 * USDC);
+        vm.prank(alice);
+        pool.borrow(60 * USDC);
+        uint256 lenderBefore = pool.convertToAssets(pool.sharesOf(lender));
+        vm.warp(block.timestamp + 30 days);
+        vm.prank(underwriter);
+        pool.seizeCollateral(alice);
+        (uint256 p, uint256 i) = pool.owed(alice);
+        assertEq(p + i, 0);
+        assertEq(pool.totalPrincipal(), 0);
+        assertEq(pool.totalWrittenOff(), 0); // fully covered by collateral
+        // ~40 USDC left minus 30 days of interest; she also keeps her pro-rata share of that interest.
+        assertApproxEqRel(pool.convertToAssets(pool.sharesOf(alice)), 40 * USDC - (60 * USDC * 1_500 * 30 days) / (365 days * 10_000), 0.001e18);
+        assertGe(pool.convertToAssets(pool.sharesOf(lender)), lenderBefore); // lenders lose nothing
+        (,, uint32 writeOffs,,,,,,) = pool.history(alice);
+        assertEq(writeOffs, 1);
+    }
+
+    function test_SecuredRepaymentsBuildHistoryAndCycles() public {
+        _fund(1_000 * USDC);
+        _secured(100 * USDC);
+        vm.prank(alice);
+        pool.borrow(40 * USDC);
+        vm.warp(block.timestamp + 8 days);
+        (uint256 p, uint256 i) = pool.owed(alice);
+        vm.prank(alice);
+        pool.repay(p + i);
+        (uint32 repayments, uint32 cycles,,,,,,,) = pool.history(alice);
+        assertEq(repayments, 1);
+        assertEq(cycles, 1);
+        (,,, uint32 apr,,,,,,) = pool.lines(alice);
+        assertEq(apr, 1_450); // secured price, 50 bps cheaper
+    }
+
+    function test_CannotSwitchSecuredToUnsecuredWhileOwing() public {
+        _fund(1_000 * USDC);
+        _secured(100 * USDC);
+        vm.prank(alice);
+        pool.borrow(10 * USDC);
+        vm.prank(underwriter);
+        vm.expectRevert(CreditLine.HasOpenLoan.selector);
+        pool.setLine(alice, 80, uint128(10 * USDC), SCORE);
     }
 }

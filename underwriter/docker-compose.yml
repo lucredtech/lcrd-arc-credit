@@ -4,7 +4,7 @@ services:
     restart: unless-stopped
     env_file: .env # UNDERWRITER_PRIVATE_KEY (never committed)
     environment:
-      POOL: "0xA801A7529C76414c811d954DdDD05Ceb63F75D8C"
+      POOL: "0xF25d9f4be85688cE02b3190D14De573145F59EEf"
       AUTO_MAX_LIMIT_USDC: "1"
       ALLOWED_ORIGINS: "https://lucredtech.github.io"
       SCORE_API: "https://credit-score-api-d4jskyskga-uc.a.run.app"

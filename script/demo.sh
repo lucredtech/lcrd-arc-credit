@@ -7,7 +7,7 @@
 # USDC (calls into 0x3600… fail with OpcodeNotFound), so each transaction is
 # sent as-is and executed by Arc itself.
 #
-#   POOL=0x... ./script/demo.sh        (reads DEPLOYER_/BORROWER_PRIVATE_KEY from .env)
+#   POOL=0x... ./script/demo.sh   (reads DEPLOYER_, UNDERWRITER_ and BORROWER_PRIVATE_KEY from .env)
 set -euo pipefail
 set -a; . ./.env; set +a
 
@@ -33,9 +33,19 @@ send() {
 echo "score report hash: $SCORE_REF"
 echo "lender: approve + deposit 3 USDC";       send "$DEPLOYER_PRIVATE_KEY" $USDC "approve(address,uint256)" "$POOL" 3000000
                                                send "$DEPLOYER_PRIVATE_KEY" "$POOL" "deposit(uint256)" 3000000
-echo "underwriter: score 71 -> contract prices it (tier A, 18.93%), 2 USDC line"; send "$DEPLOYER_PRIVATE_KEY" "$POOL" "setLine(address,uint8,uint128,bytes32)" "$BORROWER" 71 2000000 "$SCORE_REF"
-echo "gas money for the borrower: 0.10 USDC";  send "$DEPLOYER_PRIVATE_KEY" $USDC "transfer(address,uint256)" "$BORROWER" 100000
-echo "borrower: draw 1 USDC";                  send "$BORROWER_PRIVATE_KEY" "$POOL" "borrow(uint256)" 1000000
-echo "borrower: approve + repay 0.50 USDC";    send "$BORROWER_PRIVATE_KEY" $USDC "approve(address,uint256)" "$POOL" 500000
-                                               send "$BORROWER_PRIVATE_KEY" "$POOL" "repay(uint256)" 500000
-echo "owed now (principal, interest):"; cast call "$POOL" "owed(address)(uint256,uint256)" "$BORROWER" --rpc-url "$RPC"
+
+echo "route 2 (Stellar score, unsecured): underwriter submits score 71 -> tier A, 18.93%, 1 USDC line"
+                                               send "$UNDERWRITER_PRIVATE_KEY" "$POOL" "setLine(address,uint8,uint128,bytes32)" "$BORROWER" 71 1000000 "$SCORE_REF"
+echo "  borrower draws 0.50, repays 0.25";     send "$BORROWER_PRIVATE_KEY" "$POOL" "borrow(uint256)" 500000
+                                               send "$BORROWER_PRIVATE_KEY" $USDC "approve(address,uint256)" "$POOL" 250000
+                                               send "$BORROWER_PRIVATE_KEY" "$POOL" "repay(uint256)" 250000
+
+echo "route 1 (liquidity, secured): the lender borrows against its own deposit, no score"
+                                               send "$DEPLOYER_PRIVATE_KEY" "$POOL" "openSecuredLine()"
+echo "  draws 0.50, repays 0.25";              send "$DEPLOYER_PRIVATE_KEY" "$POOL" "borrow(uint256)" 500000
+                                               send "$DEPLOYER_PRIVATE_KEY" $USDC "approve(address,uint256)" "$POOL" 250000
+                                               send "$DEPLOYER_PRIVATE_KEY" "$POOL" "repay(uint256)" 250000
+
+echo "owed now (principal, interest):"
+echo "  unsecured borrower: $(cast call "$POOL" "owed(address)(uint256,uint256)" "$BORROWER" --rpc-url "$RPC" | tr '\n' ' ')"
+echo "  secured lender:     $(cast call "$POOL" "owed(address)(uint256,uint256)" "$(cast wallet address --private-key "$DEPLOYER_PRIVATE_KEY")" --rpc-url "$RPC" | tr '\n' ' ')"
