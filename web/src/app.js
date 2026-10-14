@@ -1,4 +1,4 @@
-import { createPublicClient, createWalletClient, custom, formatUnits, http, parseAbi, parseUnits } from "viem"
+import { createPublicClient, createWalletClient, custom, fallback, formatUnits, http, parseAbi, parseUnits } from "viem"
 import { arc } from "viem/chains"
 import { CONTRACT, DEPLOY_BLOCK } from "./config.js"
 
@@ -37,7 +37,15 @@ const ERC20_ABI = parseAbi([
   "function approve(address spender, uint256 amount) returns (bool)",
 ])
 
-const reader = createPublicClient({ chain: arc, transport: http() })
+// Every public Arc mainnet RPC, tried in order: if one is blocked by a browser
+// shield, a network or a rate limit, reads move on to the next. Contract reads
+// are batched into Multicall3 calls to keep the request count low.
+const RPCS = arc.rpcUrls.default.http
+const reader = createPublicClient({
+  chain: arc,
+  transport: fallback(RPCS.map((url) => http(url, { timeout: 12_000, retryCount: 0 })), { retryCount: 1 }),
+  batch: { multicall: { wait: 16 } },
+})
 let wallet = null
 let account = null
 
@@ -115,13 +123,16 @@ async function loadMe() {
   $("connect").textContent = `${short(account)} · ${usd(bal)} USDC`
 }
 
+let refreshCount = 0
 async function refresh() {
   try {
-    await Promise.all([loadPool(), loadLines(), loadActivity(), loadMe()])
+    refreshCount++
+    await Promise.all([loadPool(), loadLines(), refreshCount % 2 === 1 ? loadActivity() : null, loadMe()])
     banner("")
   } catch (err) {
     console.error(err)
-    banner(`Could not read the pool from Arc (${err.shortMessage ?? err.message}). Check your connection; the page retries every 15 seconds.`)
+    const where = err?.url ? ` via ${new URL(err.url).host}` : ""
+    banner(`Could not read the pool from Arc${where} (${err.shortMessage ?? err.message}). Tried ${RPCS.length} public Arc RPCs. If you use Brave, try turning Shields off for this site; the page retries every 30 seconds.`)
   }
 }
 
@@ -208,4 +219,4 @@ document.querySelectorAll("[data-act]").forEach((b) => b.addEventListener("click
 }))
 
 refresh()
-setInterval(refresh, 15_000)
+setInterval(refresh, 30_000)
