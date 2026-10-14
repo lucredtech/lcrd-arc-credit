@@ -71,6 +71,8 @@
 }
 
 * { box-sizing: border-box; }
+/* Component display rules (e.g. .card's flex) must never override the hidden attribute. */
+[hidden] { display: none !important; }
 html { color-scheme: dark; }
 html, body { margin: 0; }
 body {
