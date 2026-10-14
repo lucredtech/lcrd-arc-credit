@@ -113,6 +113,38 @@ function parseMessage(message) {
   return { arc: getAddress(m[1]), stellar: m[2] }
 }
 
+// ---- read-only Arc RPC relay ----
+// Brave Shields blocks browser requests to the public Arc RPC endpoints
+// (net::ERR_BLOCKED_BY_CLIENT). The app reads through this relay first, so it
+// works with Shields on. Read methods only; transactions go from the user's wallet.
+const RELAY_METHODS = new Set(["eth_chainId", "eth_blockNumber", "eth_call", "eth_getLogs", "eth_getBalance", "eth_getCode",
+  "eth_getTransactionReceipt", "eth_getTransactionByHash", "eth_getBlockByNumber", "eth_getBlockByHash", "eth_estimateGas",
+  "eth_gasPrice", "eth_maxPriorityFeePerGas", "eth_feeHistory", "net_version"])
+const RELAY_UPSTREAMS = arc.rpcUrls.default.http
+const relayHits = new Map() // ip -> [timestamps], per minute
+function relayLimited(ip) {
+  const now = Date.now()
+  const hits = (relayHits.get(ip) ?? []).filter((t) => now - t < 60_000)
+  hits.push(now)
+  relayHits.set(ip, hits)
+  return hits.length > 240
+}
+async function relay(raw) {
+  const body = JSON.parse(raw)
+  const calls = Array.isArray(body) ? body : [body]
+  if (calls.length === 0 || calls.length > 20) throw new Error("Batch too large.")
+  for (const c of calls) if (!RELAY_METHODS.has(c?.method)) throw new Error(`Method not allowed: ${c?.method}`)
+  let lastErr
+  for (const url of RELAY_UPSTREAMS) {
+    try {
+      const r = await fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body), signal: AbortSignal.timeout(15_000) })
+      if (r.ok) return await r.text()
+      lastErr = new Error(`upstream ${r.status}`)
+    } catch (e) { lastErr = e }
+  }
+  throw lastErr ?? new Error("no upstream")
+}
+
 const recent = new Map() // ip -> [timestamps]
 function rateLimited(ip) {
   const now = Date.now()
@@ -197,6 +229,16 @@ const server = http.createServer(async (req, res) => {
     if (req.method === "GET" && req.url === "/health") {
       const uw = await reader.readContract({ address: POOL, abi: POOL_ABI, functionName: "underwriter" })
       return send(res, 200, { ok: true, pool: POOL, underwriter: account.address, active: uw.toLowerCase() === account.address.toLowerCase(), autoMaxLimitUsdc: Number(AUTO_MAX_LIMIT) / 1e6 }, origin)
+    }
+    if (req.method === "POST" && req.url === "/chain") {
+      if (relayLimited(ip)) return send(res, 429, { jsonrpc: "2.0", id: null, error: { code: -32005, message: "rate limited" } }, origin)
+      let raw = ""
+      for await (const chunk of req) { raw += chunk; if (raw.length > 64_000) return send(res, 413, { error: "Request too large." }, origin) }
+      const text = await relay(raw)
+      const headers = { "content-type": "application/json", "cache-control": "no-store" }
+      if (origin && ORIGINS.includes(origin)) Object.assign(headers, { "access-control-allow-origin": origin, "access-control-allow-headers": "content-type", "access-control-allow-methods": "GET, POST, OPTIONS", vary: "origin" })
+      res.writeHead(200, headers)
+      return res.end(text)
     }
     if (req.method === "POST" && req.url === "/request-line") {
       if (rateLimited(ip)) return send(res, 429, { error: "Too many requests. Try again later." }, origin)

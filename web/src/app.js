@@ -56,7 +56,9 @@ const ERC20_ABI = parseAbi([
 // Every public Arc mainnet RPC, tried in order: if one is blocked by a browser
 // shield, a network or a rate limit, reads move on to the next. Contract reads
 // are batched into Multicall3 calls to keep the request count low.
-const RPCS = arc.rpcUrls.default.http
+// Our read-only relay first: Brave Shields blocks browser requests to the public Arc RPCs
+// (net::ERR_BLOCKED_BY_CLIENT). The public endpoints remain as fallbacks.
+const RPCS = [`${UNDERWRITER_API}/chain`, ...arc.rpcUrls.default.http]
 const reader = createPublicClient({
   chain: arc,
   transport: fallback(RPCS.map((url) => http(url, { timeout: 12_000, retryCount: 0 })), { retryCount: 1 }),
