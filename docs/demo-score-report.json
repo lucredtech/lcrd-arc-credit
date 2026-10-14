@@ -1,0 +1,16 @@
+{
+  "schema": "lcrd-score-report/1",
+  "note": "Synthetic report for the public demo. No real person's data.",
+  "subject": "0xfb3B44ce78De13e18Df55be0F92b94C7e5879dDc",
+  "computedAt": "2026-10-14T14:00:00Z",
+  "model": "LCRD activity score v1",
+  "score": 71,
+  "tier": 2,
+  "components": [
+    { "name": "repayment_history", "points": 24, "max": 30 },
+    { "name": "income_consistency", "points": 21, "max": 25 },
+    { "name": "cashflow_buffer", "points": 14, "max": 25 },
+    { "name": "tenure", "points": 12, "max": 20 }
+  ],
+  "policy": { "limitUsdc": "3.00", "aprBps": 1200 }
+}

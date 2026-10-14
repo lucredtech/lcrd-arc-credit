@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>LCRD Credit Line on Arc</title>
+  <meta name="description" content="A USDC lending pool on Arc with underwritten credit lines backed by LCRD credit scores.">
+  <link rel="icon" type="image/svg+xml" href="logo.svg">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="top">
+    <div class="wrap top-row">
+      <div class="brand"><img class="logo" src="logo.svg" alt="" width="26" height="26"> LCRD Credit Line <span class="net">Arc mainnet</span></div>
+      <button id="connect" class="ghost">Connect wallet</button>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <section class="hero">
+      <h1>Credit lines in USDC, underwritten by a credit score.</h1>
+      <p class="lede">Lenders pool USDC. LCRD scores a borrower's real financial activity off-chain and opens a line with a limit, an APR and a risk tier. Only a hash of the score report goes on-chain, never personal data. Borrowers draw and repay in USDC, and repaid interest raises every lender's share.</p>
+      <div class="stats">
+        <div class="stat"><span class="n" id="s-assets">–</span><span class="l">pool value (USDC)</span></div>
+        <div class="stat"><span class="n" id="s-cash">–</span><span class="l">available to lend</span></div>
+        <div class="stat"><span class="n" id="s-out">–</span><span class="l">lent out</span></div>
+        <div class="stat"><span class="n" id="s-int">–</span><span class="l">interest repaid</span></div>
+        <div class="stat"><span class="n" id="s-share">–</span><span class="l">value of 1 USDC lent at launch</span></div>
+      </div>
+      <p class="meta">Contract <a id="contract" target="_blank" rel="noopener">–</a> · Underwriter <a id="underwriter" target="_blank" rel="noopener">–</a> · Block <span id="block">–</span></p>
+    </section>
+
+    <section class="grid2">
+      <div class="card">
+        <h2>Lend</h2>
+        <p class="hint">Deposit USDC into the pool and receive shares. Withdraw any time there is cash available.</p>
+        <div class="kv"><span>Your shares</span><b id="my-shares">–</b></div>
+        <div class="kv"><span>Worth</span><b id="my-worth">–</b></div>
+        <div class="row"><input id="lend-amt" type="number" min="0" step="0.01" placeholder="USDC"><button data-act="deposit">Deposit</button></div>
+        <div class="row"><button class="ghost" data-act="withdraw">Withdraw all</button></div>
+      </div>
+      <div class="card">
+        <h2>Borrow</h2>
+        <p class="hint">Only wallets with a line from the underwriter can draw. Interest accrues by the second; repayments go to interest first.</p>
+        <div class="kv"><span>Your line</span><b id="my-line">connect a wallet</b></div>
+        <div class="kv"><span>You owe</span><b id="my-owed">–</b></div>
+        <div class="kv"><span>Available to draw</span><b id="my-avail">–</b></div>
+        <div class="row"><input id="borrow-amt" type="number" min="0" step="0.01" placeholder="USDC"><button data-act="borrow">Borrow</button></div>
+        <div class="row"><input id="repay-amt" type="number" min="0" step="0.01" placeholder="USDC"><button class="ghost" data-act="repay">Repay</button></div>
+      </div>
+    </section>
+    <p class="status" id="status" role="status"></p>
+
+    <section>
+      <h2>Credit lines</h2>
+      <p class="hint">Every line on the contract. The score reference is the keccak-256 hash of the off-chain LCRD score report that justified the limit.</p>
+      <div class="table-wrap"><table id="lines">
+        <thead><tr><th>Borrower</th><th>Tier</th><th class="num">Limit</th><th class="num">APR</th><th class="num">Principal</th><th class="num">Interest</th><th>Score ref</th><th>Status</th></tr></thead>
+        <tbody><tr><td colspan="8" class="empty">Loading…</td></tr></tbody>
+      </table></div>
+    </section>
+
+    <section>
+      <h2>Activity</h2>
+      <div class="table-wrap"><table id="activity">
+        <thead><tr><th>Block</th><th>Event</th><th>Who</th><th class="num">Amount</th><th>Tx</th></tr></thead>
+        <tbody><tr><td colspan="5" class="empty">Loading…</td></tr></tbody>
+      </table></div>
+    </section>
+  </main>
+
+  <footer class="wrap foot">
+    <span>MIT licensed · <a href="https://github.com/lucredtech/lcrd-arc-credit" target="_blank" rel="noopener">Source</a></span>
+    <span>Arc mainnet · chain 5042 · USDC <code>0x3600…0000</code></span>
+  </footer>
+  <script type="module" src="app.js"></script>
+</body>
+</html>
