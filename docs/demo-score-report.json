@@ -1,11 +1,25 @@
 {
   "schema": "lcrd-score-report/1",
-  "note": "Synthetic report for the public demo. No real person's data.",
+  "note": "Synthetic borrower profile for the public demo. No real person's data. Scored with LCRD's activity-path rules by script/demo-score.mjs.",
   "subject": "0xfb3B44ce78De13e18Df55be0F92b94C7e5879dDc",
   "computedAt": "2026-10-14T21:00:00Z",
   "model": "LCRD activity score v1",
-  "score": 71,
-  "tier": "A",
+  "path": "activity",
+  "profile": {
+    "distinctProtocols": 3,
+    "meaningfulActions": 40,
+    "distinctActiveDays": 45,
+    "trackRecordDays": 150,
+    "yield": {
+      "distinctIncomeMonths": 8,
+      "realizedReturn": 0.08
+    },
+    "distributions": null,
+    "rewards": {
+      "distinctClaimMonths": 2,
+      "totalClaimedUsd": 10
+    }
+  },
   "components": [
     {
       "name": "breadth",
@@ -15,15 +29,15 @@
     },
     {
       "name": "volume",
-      "label": "Volume",
-      "points": 18,
+      "label": "Activity",
+      "points": 25,
       "max": 25
     },
     {
       "name": "consistency",
       "label": "Active days",
       "points": 20,
-      "max": 30
+      "max": 26
     },
     {
       "name": "tenure",
@@ -33,15 +47,30 @@
     },
     {
       "name": "income",
-      "label": "Income signals",
-      "points": 7,
-      "max": 15
+      "label": "Yield income",
+      "points": 9,
+      "max": 12
+    },
+    {
+      "name": "distribution",
+      "label": "Payroll / distributions",
+      "points": 0,
+      "max": 6
+    },
+    {
+      "name": "rewards",
+      "label": "Protocol rewards",
+      "points": 2,
+      "max": 4
     }
   ],
+  "raw": 82,
+  "scaling": "score = 34 + ((raw - 8) / 85)^3 * 56, clamped to 34..90 (activity path)",
+  "score": 71,
+  "tier": "A",
   "policy": {
     "version": "lcrd-unsecured-2026-10",
     "requestedLimitUsdc": "2.00",
-    "note": "Tier, APR and the tier's maximum line are computed on-chain by CreditLine.quote(score)."
-  },
-  "path": "activity"
+    "note": "Tier, APR and the maximum line are computed on-chain by CreditLine.quote(score, cycles)."
+  }
 }

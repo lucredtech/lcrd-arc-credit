@@ -52,9 +52,9 @@ Interest accrues by the second; repayments go to interest first, then principal,
 
 ## The demo on mainnet
 
-`script/demo.sh` runs a full cycle with real USDC: a lender deposits 3 USDC; the underwriter submits score 71 for a demo borrower, and the contract prices it at tier A, 18.93%, for a 2 USDC line, backed by the hash of [`docs/demo-score-report.json`](docs/demo-score-report.json) (a synthetic report, not a real person); the borrower draws 1 USDC and repays 0.50, leaving a live loan on the page. The repayment is in the borrower's on-chain history, and repaying the rest after 7 days completes their first cycle.
+`script/demo.sh` runs a full cycle with real USDC: a lender deposits 3 USDC; the underwriter submits score 71 for a demo borrower, and the contract prices it at tier A, 18.93%, for a 2 USDC line, backed by the hash of [`docs/demo-score-report.json`](docs/demo-score-report.json): a synthetic borrower profile (not a real person) scored with LCRD's actual activity-path rules by [`script/demo-score.mjs`](script/demo-score.mjs), raw 82 → score 71; the borrower draws 1 USDC and repays 0.50, leaving a live loan on the page. The repayment is in the borrower's on-chain history, and repaying the rest after 7 days completes their first cycle.
 
-The line's `scoreRef` on-chain is `0xdd9ac9b2688389fe91694a6fb73ee707e37d5e4104eb42759671525faa27a52a`, the keccak-256 of the report file:
+The line's `scoreRef` on-chain is `0x9b5448e8cdf6475cc57e8675be8a936543894f3318cc0f65902334eff111a4d0`, the keccak-256 of the report file:
 
 ```bash
 cast keccak "0x$(xxd -p docs/demo-score-report.json | tr -d '\n')"
