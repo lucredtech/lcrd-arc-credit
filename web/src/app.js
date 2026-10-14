@@ -1,6 +1,7 @@
 import { createPublicClient, createWalletClient, custom, fallback, formatUnits, http, keccak256, parseAbi, parseUnits, toHex } from "viem"
 import { arc } from "viem/chains"
-import { CONTRACT, DEPLOY_BLOCK } from "./config.js"
+import { CONTRACT, DEPLOY_BLOCK, UNDERWRITER_API } from "./config.js"
+import { isConnected as freighterConnected, requestAccess as freighterAccess, signMessage as freighterSign } from "@stellar/freighter-api"
 
 const USDC = "0x3600000000000000000000000000000000000000" // native USDC, ERC-20 interface (6 decimals)
 const EXPLORER = "https://explorer.arc.io"
@@ -160,6 +161,7 @@ async function loadMe() {
   $("borrow-note").textContent = canBorrow ? "" : hasLine ? (line.active ? "Your line is fully drawn or the pool is empty." : "This line is frozen: repayments only.") : "This wallet has no credit line. Lines are opened by the underwriter after an LCRD credit check."
   if (owes > 0n) $("repay-amt").placeholder = `up to ${usd(owes, 6)} USDC`
   $("connect").textContent = `${short(account)} · ${usd(bal)} USDC`
+  $("apply-card").hidden = hasLine
   const uw = await read("underwriter")
   $("uw-card").hidden = uw.toLowerCase() !== account.toLowerCase()
 }
@@ -273,6 +275,38 @@ const actions = {
     if (a > p + i) a = p + i + 1n // accrual between now and inclusion; the contract never takes more than is owed
     await ensureAllowance(a)
     await send("repay", [a], "Repay")
+  },
+  async apply() {
+    const out = $("apply-result")
+    out.classList.remove("bad")
+    const fc = await freighterConnected().catch(() => ({ isConnected: false }))
+    if (!fc?.isConnected) throw new Error("Freighter was not found. Install it from freighter.app and add your Stellar wallet, then try again.")
+    const access = await freighterAccess()
+    if (access.error || !access.address) throw new Error(access.error?.message ?? "Freighter did not share an address.")
+    const stellar = access.address
+    if (!/^G[A-Z2-7]{55}$/.test(stellar)) throw new Error("Use a Stellar account address (G…) in Freighter.")
+
+    const message = `LCRD credit on Arc\nArc wallet: ${account}\nStellar wallet: ${stellar}\nIssued: ${new Date().toISOString()}`
+    status("Sign the message in your Arc wallet…")
+    const arcSignature = await wallet.signMessage({ account, message })
+    status("Now sign the same message in Freighter…")
+    const signed = await freighterSign(message, { address: stellar })
+    if (signed.error || !signed.signedMessage) throw new Error(signed.error?.message ?? "Freighter did not sign.")
+    const sm = signed.signedMessage
+    const stellarSignature = typeof sm === "string" ? sm : btoa(String.fromCharCode(...new Uint8Array(sm.buffer ?? sm, sm.byteOffset ?? 0, sm.byteLength ?? sm.length)))
+
+    status("LCRD is scoring your Stellar history…")
+    const res = await fetch(`${UNDERWRITER_API}/request-line`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ message, arcSignature, stellarSignature }) })
+    const body = await res.json().catch(() => ({}))
+    if (!res.ok) throw new Error(body.error ?? `The underwriter returned HTTP ${res.status}.`)
+    if (!body.eligible) {
+      out.classList.add("bad")
+      out.textContent = `Score ${body.score}, tier ${body.tier}. ${body.reason}`
+      status("")
+      return
+    }
+    out.innerHTML = `Approved: score ${body.score}, tier ${body.tier}. Line of ${body.limit} USDC at ${pct(body.aprBps)} opened ${link("tx", body.txHash, "on Arc")}. You can borrow now.`
+    status("")
   },
   async setline() {
     const who = $("uw-addr").value.trim()

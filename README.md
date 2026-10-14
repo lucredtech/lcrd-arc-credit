@@ -42,6 +42,18 @@ Example: score 71 → tier A, 8% + 7.93% + 3% = **18.93%**. Anyone can price any
 
 `history(borrower)` records repayments, total borrowed and repaid, completed cycles, write-offs, and first-borrow and last-repay times. A cycle completes when a loan that used at least 25% of the line and ran at least 7 days is repaid in full (so dust loans cannot farm it). The contract then lowers that line's APR automatically and emits `CycleCompleted`; the underwriter can raise the limit up to the new maximum. A write-off resets completed cycles.
 
+### Automated underwriting (live)
+
+Borrowers request a line from the app; no human is involved:
+
+1. The borrower signs one message, naming both wallets, with their Arc wallet (EVM, secp256k1) and with their Stellar wallet in Freighter (ed25519, SEP-53). Nothing moves between chains: Stellar is only the evidence, Arc is where the credit lives.
+2. The underwriter service ([`underwriter/`](underwriter/)) checks both signatures, asks LCRD's public scoring API for the Stellar wallet's score, builds the score report (including the signed link) and hashes it.
+3. For tier A or B it calls `setLine` with its own underwriter key; tier C gets a clear "not yet". Each Stellar wallet can back one Arc wallet, requests are rate-limited, and automatic lines are capped at 1 USDC while the pool is small.
+
+Running this unattended is safe because of the on-chain pricing: the underwriter key cannot choose an APR, exceed a tier's limit or lend to tier C, so even a compromised server can only open small lines at policy prices. The owner wallet can replace the underwriter at any time with `setUnderwriter`.
+
+Service: `https://172-210-243-202.sslip.io` (`GET /health`, `POST /request-line`), underwriter `0xfC767715605990035056725979B2F6B558264882`.
+
 ### Lenders
 
 Lenders deposit USDC and receive pool shares. Their yield is the interest borrowers repay, shared pro rata: the pool is worth its cash plus principal still lent out, and repaid interest raises every share. Idle USDC earns nothing, so yield depends on how much of the pool is lent. Loans are **unsecured**: there is no collateral, so a written-off line lowers share value. That is why lines start small and only grow with a repayment record.

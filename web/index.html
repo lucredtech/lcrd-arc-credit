@@ -54,6 +54,17 @@
         <div class="row"><input id="repay-amt" type="number" min="0" step="0.01" placeholder="USDC"><button class="ghost" data-act="repay">Repay</button></div>
       </div>
     </section>
+    <section class="card apply" id="apply-card" hidden>
+      <h2>Get a credit line</h2>
+      <p class="hint">No forms. LCRD scores your Stellar wallet's on-chain history and, if you qualify, opens a line for this Arc wallet automatically. You sign one message with each wallet to prove both are yours; nothing moves between chains and no personal data goes on-chain. Automatic lines are capped at 1 USDC while the pool is small.</p>
+      <ol class="steps">
+        <li>Connect this Arc wallet (top right).</li>
+        <li>Have <a href="https://www.freighter.app/" target="_blank" rel="noopener">Freighter</a> installed with the Stellar wallet you use for DeFi.</li>
+        <li>Sign two messages: one in your Arc wallet, one in Freighter.</li>
+      </ol>
+      <div class="row"><button data-act="apply">Check my score and request a line</button></div>
+      <p class="next" id="apply-result"></p>
+    </section>
     <section class="card uw" id="uw-card" hidden>
       <h2>Underwriter</h2>
       <p class="hint">Visible only to the underwriter wallet. Enter the borrower's LCRD score; the contract sets the tier, APR and maximum line. The score reference is the keccak-256 hash of the score report (leave it empty to use a placeholder hash for testing).</p>
@@ -112,6 +123,6 @@
     <span>MIT licensed · <a href="https://github.com/lucredtech/lcrd-arc-credit" target="_blank" rel="noopener">Source</a></span>
     <span>Arc mainnet · chain 5042 · USDC <code>0x3600…0000</code></span>
   </footer>
-  <script type="module" src="app.bundle.js?v=6"></script>
+  <script type="module" src="app.bundle.js?v=7"></script>
 </body>
 </html>

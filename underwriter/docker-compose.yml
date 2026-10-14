@@ -1,0 +1,22 @@
+services:
+  underwriter:
+    build: .
+    restart: unless-stopped
+    env_file: .env # UNDERWRITER_PRIVATE_KEY (never committed)
+    environment:
+      POOL: "0xA801A7529C76414c811d954DdDD05Ceb63F75D8C"
+      AUTO_MAX_LIMIT_USDC: "1"
+      ALLOWED_ORIGINS: "https://lucredtech.github.io"
+      SCORE_API: "https://credit-score-api-d4jskyskga-uc.a.run.app"
+    volumes:
+      - ./data:/app/data
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports: ["80:80", "443:443"]
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+    depends_on: [underwriter]
+volumes:
+  caddy_data:

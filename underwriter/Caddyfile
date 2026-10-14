@@ -1,0 +1,4 @@
+# sslip.io resolves the name to the VM's IP, so Caddy can get a real certificate without DNS changes.
+172-210-243-202.sslip.io {
+	reverse_proxy underwriter:8080
+}

@@ -6,3 +6,5 @@ node_modules/
 .DS_Store
 broadcast/*/*/dry-run/
 node_modules/
+underwriter/data/
+underwriter/.env
