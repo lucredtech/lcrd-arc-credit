@@ -102,9 +102,9 @@ async function loadLines() {
   const rows = await Promise.all(addrs.map(async (a) => ({ a, l: asLine(await read("lines", [a])), h: asHistory(await read("history", [a])), o: await read("owed", [a]) })))
   body.innerHTML = rows.map(({ a, l, h, o }) => `<tr>
     <td>${link("address", a)}</td>
-    <td>${l.secured ? '<span class="tag">secured</span>' : '<span class="tag ok">unsecured</span>'}</td>
+    <td>${l.secured ? '<span class="tag sec">secured</span>' : '<span class="tag ok">unsecured</span>'}</td>
     <td class="num">${l.secured && !l.score ? "–" : l.score}</td>
-    <td>${l.secured ? "–" : `<span class="tag">${TIER[l.tier]}</span>`}</td>
+    <td>${l.secured ? "–" : `<span class="tag tier-${TIER[l.tier]}">${TIER[l.tier]}</span>`}</td>
     <td class="num">${usd(l.limit)}</td>
     <td class="num">${pct(l.aprBps)}</td>
     <td class="num">${usd(o[0])}</td>
@@ -150,6 +150,20 @@ async function loadMe() {
     : line.secured ? `Secured · up to ${usd(cap)} USDC at ${pct(line.aprBps)}${line.active ? "" : " · frozen"}`
     : `Unsecured · ${usd(line.limit)} USDC at ${pct(line.aprBps)}${line.active ? "" : " · frozen"}`
   $("my-score").textContent = !hasLine ? "–" : line.secured && !line.score ? "not needed (secured)" : `${line.score} / 100 · tier ${TIER[line.tier]}`
+  const sc = $("score-card")
+  sc.hidden = !hasLine
+  if (hasLine) {
+    const scored = !(line.secured && !line.score)
+    const t = line.secured ? "S" : TIER[line.tier]
+    sc.dataset.tier = t
+    $("tier-badge").textContent = line.secured ? "S" : t
+    $("score-num").textContent = scored ? line.score : "–"
+    $("score-out").textContent = scored ? "/ 100" : ""
+    $("score-fill").style.width = scored ? `${line.score}%` : "0%"
+    $("score-caption").textContent = line.secured
+      ? `Secured line against your deposit · ${pct(line.aprBps)} APR${scored ? ` · LCRD score on file` : " · no score needed"}`
+      : `LCRD tier ${t} · ${pct(line.aprBps)} APR, set on-chain from your score`
+  }
   $("my-collateral").textContent = collat > 0n ? `${usd(collat)} USDC deposited · borrow up to ${usd(cap)} against it` : "No deposit"
   $("my-history").textContent = hasLine ? `${h.repayments} repayment${h.repayments === 1 ? "" : "s"} · ${h.cycles} completed cycle${h.cycles === 1 ? "" : "s"}` : "–"
   $("my-owed").textContent = owes > 0n ? `${usd(owes, 6)} USDC` : "Nothing — you owe 0 USDC"
