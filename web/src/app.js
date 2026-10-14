@@ -1,5 +1,5 @@
-import { createPublicClient, createWalletClient, custom, formatUnits, http, parseAbi, parseUnits } from "https://esm.sh/viem@2.57.5?target=es2022"
-import { arc } from "https://esm.sh/viem@2.57.5/chains?target=es2022"
+import { createPublicClient, createWalletClient, custom, formatUnits, http, parseAbi, parseUnits } from "viem"
+import { arc } from "viem/chains"
 import { CONTRACT, DEPLOY_BLOCK } from "./config.js"
 
 const USDC = "0x3600000000000000000000000000000000000000" // native USDC, ERC-20 interface (6 decimals)
@@ -47,6 +47,7 @@ const short = (a) => (a ? `${a.slice(0, 6)}…${a.slice(-4)}` : "")
 const link = (kind, v, text) => `<a class="mono" href="${EXPLORER}/${kind}/${v}" target="_blank" rel="noopener">${text ?? short(v)}</a>`
 const read = (functionName, args = []) => reader.readContract({ address: CONTRACT, abi: POOL_ABI, functionName, args })
 const status = (msg) => { $("status").innerHTML = msg }
+const banner = (msg) => { const b = $("banner"); b.textContent = msg; b.hidden = !msg }
 const setLink = (el, href, text) => { el.href = href; el.textContent = text }
 
 async function loadPool() {
@@ -117,24 +118,50 @@ async function loadMe() {
 async function refresh() {
   try {
     await Promise.all([loadPool(), loadLines(), loadActivity(), loadMe()])
+    banner("")
   } catch (err) {
     console.error(err)
-    status(`Could not read Arc: ${err.shortMessage ?? err.message}`)
+    banner(`Could not read the pool from Arc (${err.shortMessage ?? err.message}). Check your connection; the page retries every 15 seconds.`)
   }
 }
 
+// Wallets announce themselves through EIP-6963; fall back to window.ethereum.
+const announced = []
+window.addEventListener("eip6963:announceProvider", (e) => announced.push(e.detail))
+window.dispatchEvent(new Event("eip6963:requestProvider"))
+const pickProvider = () => announced.find((p) => /metamask|rabby|brave|coinbase|okx/i.test(p.info?.name ?? ""))?.provider ?? announced[0]?.provider ?? window.ethereum
+
+let provider = null
+
+function walletError(err) {
+  if (err?.code === 4001) return "Request rejected in your wallet."
+  if (err?.code === -32002) return "Your wallet already has a request open. Open the wallet extension to continue."
+  return err?.shortMessage ?? err?.message ?? String(err)
+}
+
 async function connect() {
-  if (!window.ethereum) throw new Error("No browser wallet found. Install MetaMask or another EVM wallet.")
-  ;[account] = await window.ethereum.request({ method: "eth_requestAccounts" })
-  const chainId = `0x${arc.id.toString(16)}`
+  provider = pickProvider()
+  if (!provider) throw new Error("No browser wallet found. Install MetaMask or Rabby, or use a wallet's built-in browser on mobile.")
+  const btn = $("connect")
+  btn.textContent = "Connecting…"
   try {
-    await window.ethereum.request({ method: "wallet_switchEthereumChain", params: [{ chainId }] })
+    ;[account] = await provider.request({ method: "eth_requestAccounts" })
+    const chainId = `0x${arc.id.toString(16)}`
+    try {
+      await provider.request({ method: "wallet_switchEthereumChain", params: [{ chainId }] })
+    } catch (err) {
+      if (err?.code === 4001) throw err
+      // Not added yet (MetaMask says 4902; other wallets use other codes): add, then switch.
+      await provider.request({ method: "wallet_addEthereumChain", params: [{ chainId, chainName: "Arc", nativeCurrency: arc.nativeCurrency, rpcUrls: [arc.rpcUrls.default.http[0]], blockExplorerUrls: [EXPLORER] }] })
+      await provider.request({ method: "wallet_switchEthereumChain", params: [{ chainId }] }).catch(() => {})
+    }
+    wallet = createWalletClient({ chain: arc, transport: custom(provider), account })
+    provider.on?.("accountsChanged", (a) => { account = a[0]; wallet = account ? createWalletClient({ chain: arc, transport: custom(provider), account }) : null; refresh() })
+    await loadMe()
   } catch (err) {
-    if (err.code !== 4902) throw err
-    await window.ethereum.request({ method: "wallet_addEthereumChain", params: [{ chainId, chainName: "Arc", nativeCurrency: arc.nativeCurrency, rpcUrls: [arc.rpcUrls.default.http[0]], blockExplorerUrls: [EXPLORER] }] })
+    btn.textContent = "Connect wallet"
+    throw err
   }
-  wallet = createWalletClient({ chain: arc, transport: custom(window.ethereum), account })
-  await loadMe()
 }
 
 async function send(functionName, args, label) {
@@ -166,7 +193,7 @@ const actions = {
   async repay() { const a = amountOf("repay-amt"); await ensureAllowance(a); await send("repay", [a], "Repay") },
 }
 
-$("connect").addEventListener("click", () => connect().catch((e) => status(e.shortMessage ?? e.message)))
+$("connect").addEventListener("click", () => connect().catch((e) => { status(walletError(e)); banner(walletError(e)) }))
 document.querySelectorAll("[data-act]").forEach((b) => b.addEventListener("click", async () => {
   b.disabled = true
   try {
@@ -174,7 +201,7 @@ document.querySelectorAll("[data-act]").forEach((b) => b.addEventListener("click
     await actions[b.dataset.act]()
     await refresh()
   } catch (e) {
-    status(e.shortMessage ?? e.message)
+    status(walletError(e))
   } finally {
     b.disabled = false
   }

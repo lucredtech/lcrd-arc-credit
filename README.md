@@ -57,7 +57,7 @@ forge script script/Deploy.s.sol --rpc-url arc --broadcast
 POOL=0x... ./script/demo.sh   # optional: one real lending cycle
 ```
 
-Then put the address and deployment block in `web/config.js` and serve `web/` as a static site. The app reads the pool straight from Arc and lets any wallet lend, withdraw, borrow (with a line) and repay.
+Then put the address and deployment block in `web/src/config.js`, run `npm install && npm run build` to bundle the app into `web/app.bundle.js` (no CDN at runtime), and serve `web/` as a static site. The app reads the pool straight from Arc and lets any wallet lend, withdraw, borrow (with a line) and repay.
 
 ## Built on
 

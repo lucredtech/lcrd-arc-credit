@@ -130,3 +130,4 @@ pre { background: var(--surface); border: 1px solid var(--line); border-radius: 
 .row input { flex: 1; }
 .status { min-height: 22px; font-size: 14px; color: var(--muted); overflow-wrap: anywhere; margin: 12px 0 0; }
 @media (max-width: 760px) { .grid2 { grid-template-columns: 1fr; } }
+.banner { margin: 16px 0 0; padding: 12px 14px; border-radius: 10px; background: var(--warn-soft); border: 1px solid color-mix(in srgb, var(--warn) 35%, transparent); font-size: 14px; }

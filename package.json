@@ -1,0 +1,12 @@
+{
+  "name": "lcrd-arc-credit-web",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "esbuild web/src/app.js --bundle --format=esm --minify --target=es2020 --outfile=web/app.bundle.js"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.10",
+    "viem": "^2.57.5"
+  }
+}
