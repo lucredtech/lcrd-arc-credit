@@ -19,8 +19,8 @@
   <main class="wrap">
     <p class="banner" id="banner" role="alert" hidden></p>
     <section class="hero">
-      <h1>Credit lines in USDC, underwritten by a credit score.</h1>
-      <p class="lede">Lenders pool USDC. LCRD scores a borrower's real financial activity off-chain and opens a line with a limit, an APR and a risk tier. Only a hash of the score report goes on-chain, never personal data. Borrowers draw and repay in USDC, and repaid interest raises every lender's share.</p>
+      <h1>Unsecured USDC credit, priced on-chain from a credit score.</h1>
+      <p class="lede">LCRD scores a borrower's real financial activity. The contract turns that score into a tier, an APR and a credit limit with a published formula anyone can check, and records every repayment so good borrowers pay less and can borrow more over time. Only a hash of the score report is on-chain, never personal data.</p>
       <div class="stats">
         <div class="stat"><span class="n" id="s-assets">–</span><span class="l">pool value (USDC)</span></div>
         <div class="stat"><span class="n" id="s-cash">–</span><span class="l">available to lend</span></div>
@@ -34,7 +34,7 @@
     <section class="grid2">
       <div class="card">
         <h2>Lend</h2>
-        <p class="hint">Deposit USDC into the pool and receive shares. Withdraw any time there is cash available.</p>
+        <p class="hint">Deposit USDC and receive pool shares. Your yield is the interest borrowers repay, shared across all lenders; it depends on how much of the pool is lent out. Loans are unsecured, so a written-off loan lowers share value. Withdraw any time there is cash available.</p>
         <div class="kv"><span>Your shares</span><b id="my-shares">–</b></div>
         <div class="kv"><span>Worth</span><b id="my-worth">–</b></div>
         <div class="row"><input id="lend-amt" type="number" min="0" step="0.01" placeholder="USDC"><button data-act="deposit">Deposit</button></div>
@@ -42,22 +42,60 @@
       </div>
       <div class="card">
         <h2>Borrow</h2>
-        <p class="hint">Only wallets with a line from the underwriter can draw. Interest accrues by the second; repayments go to interest first.</p>
+        <p class="hint">Unsecured: no collateral. Only wallets with a line from the underwriter can draw. Interest accrues by the second; repayments go to interest first.</p>
         <div class="kv"><span>Your line</span><b id="my-line">connect a wallet</b></div>
+        <div class="kv"><span>LCRD score</span><b id="my-score">–</b></div>
+        <div class="kv"><span>Repayment record</span><b id="my-history">–</b></div>
         <div class="kv"><span>You owe</span><b id="my-owed">–</b></div>
         <div class="kv"><span>Available to draw</span><b id="my-avail">–</b></div>
+        <p class="next" id="my-next"></p>
+        <p class="note" id="borrow-note"></p>
         <div class="row"><input id="borrow-amt" type="number" min="0" step="0.01" placeholder="USDC"><button data-act="borrow">Borrow</button></div>
         <div class="row"><input id="repay-amt" type="number" min="0" step="0.01" placeholder="USDC"><button class="ghost" data-act="repay">Repay</button></div>
       </div>
     </section>
+    <section class="card uw" id="uw-card" hidden>
+      <h2>Underwriter</h2>
+      <p class="hint">Visible only to the underwriter wallet. Enter the borrower's LCRD score; the contract sets the tier, APR and maximum line. The score reference is the keccak-256 hash of the score report (leave it empty to use a placeholder hash for testing).</p>
+      <div class="uw-grid">
+        <label>Borrower<input id="uw-addr" placeholder="0x…" autocomplete="off"></label>
+        <label>LCRD score (0–100)<input id="uw-score" type="number" min="0" max="100" step="1" value="71"></label>
+        <label>Limit (USDC)<input id="uw-limit" type="number" min="0" step="0.01" value="1.00"></label>
+        <label class="wide">Score reference<input id="uw-ref" placeholder="0x… (optional)" autocomplete="off"></label>
+      </div>
+      <p class="next" id="uw-quote"></p>
+      <div class="row"><button data-act="setline">Open / update line</button><button class="ghost" data-act="freeze">Freeze line</button></div>
+    </section>
     <p class="status" id="status" role="status"></p>
 
     <section>
+      <h2>How LCRD scores and prices credit</h2>
+      <div class="how">
+        <div class="card">
+          <h3>1 · The score (0–100), off-chain</h3>
+          <p>LCRD reads a borrower's real financial behaviour: completed borrow-and-repay cycles where they exist, otherwise activity (protocols used, volume, active days, length of track record) plus income signals. The report is hashed; only the hash goes on-chain, so no personal data does.</p>
+          <p class="mono-sm">Tier A 67–100 · Tier B 34–66 · Tier C 0–33</p>
+        </div>
+        <div class="card">
+          <h3>2 · The price, on-chain</h3>
+          <p>The contract computes the APR from the score with LCRD's published policy; nobody can quote a borrower a different rate.</p>
+          <p class="mono-sm">APR = 8% cost of funds<br>+ score premium: 20% at score 0 → 3% at score 100<br>+ 3% unsecured surcharge<br>− 0.5% per completed cycle (up to 2%)<br>kept between 6% and 36%</p>
+          <p>Example: score 71 → 8% + 7.93% + 3% = <b>18.93%</b>. Check any score with <code>quote(score, cycles)</code>.</p>
+        </div>
+        <div class="card">
+          <h3>3 · Repayments build credit</h3>
+          <p>Every repayment is recorded on-chain. A cycle completes when a loan using at least 25% of the line, held at least 7 days, is repaid in full. Each completed cycle cuts the APR by 0.5% automatically and lets the line grow by another starter amount.</p>
+          <p class="mono-sm">Starter line: A 100 USDC · B 75 USDC · C none<br>Ceiling: A 2,500 USDC · B 250 USDC<br>A write-off resets completed cycles to zero</p>
+        </div>
+      </div>
+    </section>
+
+    <section>
       <h2>Credit lines</h2>
-      <p class="hint">Every line on the contract. The score reference is the keccak-256 hash of the off-chain LCRD score report that justified the limit.</p>
+      <p class="hint">Every line on the contract, with its on-chain repayment record. The score reference is the keccak-256 hash of the LCRD score report that justified the line.</p>
       <div class="table-wrap"><table id="lines">
-        <thead><tr><th>Borrower</th><th>Tier</th><th class="num">Limit</th><th class="num">APR</th><th class="num">Principal</th><th class="num">Interest</th><th>Score ref</th><th>Status</th></tr></thead>
-        <tbody><tr><td colspan="8" class="empty">Loading…</td></tr></tbody>
+        <thead><tr><th>Borrower</th><th class="num">Score</th><th>Tier</th><th class="num">Limit</th><th class="num">APR</th><th class="num">Principal</th><th class="num">Interest</th><th class="num">Repayments · cycles</th><th>Score ref</th><th>Status</th></tr></thead>
+        <tbody><tr><td colspan="10" class="empty">Loading…</td></tr></tbody>
       </table></div>
     </section>
 
@@ -74,6 +112,6 @@
     <span>MIT licensed · <a href="https://github.com/lucredtech/lcrd-arc-credit" target="_blank" rel="noopener">Source</a></span>
     <span>Arc mainnet · chain 5042 · USDC <code>0x3600…0000</code></span>
   </footer>
-  <script type="module" src="app.bundle.js?v=3"></script>
+  <script type="module" src="app.bundle.js?v=6"></script>
 </body>
 </html>

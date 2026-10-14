@@ -1,4 +1,4 @@
-import { createPublicClient, createWalletClient, custom, fallback, formatUnits, http, parseAbi, parseUnits } from "viem"
+import { createPublicClient, createWalletClient, custom, fallback, formatUnits, http, keccak256, parseAbi, parseUnits, toHex } from "viem"
 import { arc } from "viem/chains"
 import { CONTRACT, DEPLOY_BLOCK } from "./config.js"
 
@@ -16,16 +16,24 @@ const POOL_ABI = parseAbi([
   "function underwriter() view returns (address)",
   "function borrowerCount() view returns (uint256)",
   "function borrowers(uint256) view returns (address)",
-  "function lines(address) view returns (uint128 limit, uint128 principal, uint128 interest, uint32 aprBps, uint8 tier, bool active, uint64 lastAccrued, bytes32 scoreRef)",
+  "function lines(address) view returns (uint128 limit, uint128 principal, uint128 interest, uint32 aprBps, uint8 tier, uint8 score, bool active, uint64 lastAccrued, bytes32 scoreRef)",
+  "function history(address) view returns (uint32 repayments, uint32 cyclesCompleted, uint32 writeOffs, uint64 firstBorrowAt, uint64 lastRepaidAt, uint64 cycleStart, uint128 cyclePeak, uint128 totalBorrowed, uint128 totalRepaid)",
+  "function quote(uint8 score, uint32 cyclesCompleted) view returns (uint8 tier, uint32 aprBps, uint256 maxLimit)",
   "function owed(address) view returns (uint256 principal, uint256 interest)",
   "function available(address) view returns (uint256)",
   "function deposit(uint256 assets) returns (uint256)",
   "function withdraw(uint256 shares) returns (uint256)",
   "function borrow(uint256 amount)",
   "function repay(uint256 amount) returns (uint256)",
+  "function setLine(address borrower, uint8 score, uint128 limit, bytes32 scoreRef)",
+  "function freeze(address borrower)",
+  "error NotOwner()", "error NotUnderwriter()", "error NotPendingOwner()", "error Reentrancy()", "error ZeroAmount()",
+  "error ZeroAddress()", "error BadScore()", "error TierNotEligible()", "error LineInactive()", "error OverLimit()",
+  "error InsufficientLiquidity()", "error InsufficientShares()", "error NothingOwed()", "error TransferFailed()",
   "event Deposited(address indexed lender, uint256 assets, uint256 shares)",
   "event Withdrawn(address indexed lender, uint256 assets, uint256 shares)",
-  "event LineSet(address indexed borrower, uint256 limit, uint256 aprBps, uint8 tier, bytes32 scoreRef)",
+  "event LineSet(address indexed borrower, uint256 limit, uint8 score, uint8 tier, uint256 aprBps, bytes32 scoreRef)",
+  "event CycleCompleted(address indexed borrower, uint32 cyclesCompleted, uint256 newAprBps)",
   "event LineFrozen(address indexed borrower)",
   "event Borrowed(address indexed borrower, uint256 amount)",
   "event Repaid(address indexed borrower, address indexed payer, uint256 interestPaid, uint256 principalPaid)",
@@ -53,8 +61,13 @@ const $ = (id) => document.getElementById(id)
 const usd = (v, dp = 2) => Number(formatUnits(v, 6)).toLocaleString("en", { minimumFractionDigits: dp, maximumFractionDigits: 6 })
 const short = (a) => (a ? `${a.slice(0, 6)}…${a.slice(-4)}` : "")
 const link = (kind, v, text) => `<a class="mono" href="${EXPLORER}/${kind}/${v}" target="_blank" rel="noopener">${text ?? short(v)}</a>`
+const TIER = { 1: "A", 2: "B", 3: "C" }
+const pct = (bps) => `${(Number(bps) / 100).toFixed(2)}%`
+const asLine = (t) => ({ limit: t[0], principal: t[1], interest: t[2], aprBps: t[3], tier: t[4], score: t[5], active: t[6], lastAccrued: t[7], scoreRef: t[8] })
+const asHistory = (t) => ({ repayments: t[0], cycles: t[1], writeOffs: t[2], firstBorrowAt: t[3], lastRepaidAt: t[4], cycleStart: t[5], cyclePeak: t[6], borrowed: t[7], repaid: t[8] })
 const read = (functionName, args = []) => reader.readContract({ address: CONTRACT, abi: POOL_ABI, functionName, args })
 const status = (msg) => { $("status").innerHTML = msg }
+const setEnabled = (act, on, why) => { const b = document.querySelector(`[data-act="${act}"]`); const input = b.previousElementSibling; b.disabled = !on; b.title = on ? "" : why; if (input?.tagName === "INPUT") input.disabled = !on }
 const banner = (msg) => { const b = $("banner"); b.textContent = msg; b.hidden = !msg }
 const setLink = (el, href, text) => { el.href = href; el.textContent = text }
 
@@ -76,18 +89,20 @@ async function loadPool() {
 async function loadLines() {
   const n = Number(await read("borrowerCount"))
   const body = $("lines").querySelector("tbody")
-  if (!n) { body.innerHTML = `<tr><td colspan="8" class="empty">No credit lines yet.</td></tr>`; return }
+  if (!n) { body.innerHTML = `<tr><td colspan="10" class="empty">No credit lines yet.</td></tr>`; return }
   const addrs = await Promise.all([...Array(n).keys()].map((i) => read("borrowers", [BigInt(i)])))
-  const rows = await Promise.all(addrs.map(async (a) => ({ a, l: await read("lines", [a]), o: await read("owed", [a]) })))
-  body.innerHTML = rows.map(({ a, l, o }) => `<tr>
+  const rows = await Promise.all(addrs.map(async (a) => ({ a, l: asLine(await read("lines", [a])), h: asHistory(await read("history", [a])), o: await read("owed", [a]) })))
+  body.innerHTML = rows.map(({ a, l, h, o }) => `<tr>
     <td>${link("address", a)}</td>
-    <td><span class="tag">tier ${l[4]}</span></td>
-    <td class="num">${usd(l[0])}</td>
-    <td class="num">${(Number(l[3]) / 100).toFixed(2)}%</td>
+    <td class="num">${l.score}</td>
+    <td><span class="tag">${TIER[l.tier]}</span></td>
+    <td class="num">${usd(l.limit)}</td>
+    <td class="num">${pct(l.aprBps)}</td>
     <td class="num">${usd(o[0])}</td>
     <td class="num">${usd(o[1], 6)}</td>
-    <td class="mono" title="${l[7]}">${short(l[7])}</td>
-    <td>${l[5] ? '<span class="tag ok">active</span>' : '<span class="tag warn">frozen</span>'}</td>
+    <td class="num" title="${usd(h.borrowed)} borrowed · ${usd(h.repaid, 6)} repaid">${h.repayments} · ${h.cycles} cycle${h.cycles === 1 ? "" : "s"}</td>
+    <td class="mono" title="${l.scoreRef}">${short(l.scoreRef)}</td>
+    <td>${l.active ? '<span class="tag ok">active</span>' : '<span class="tag warn">frozen</span>'}</td>
   </tr>`).join("")
 }
 
@@ -111,16 +126,42 @@ async function loadActivity() {
 
 async function loadMe() {
   if (!account) return
-  const [shares, line, owedNow, avail, bal] = await Promise.all([
-    read("sharesOf", [account]), read("lines", [account]), read("owed", [account]), read("available", [account]),
+  const [shares, lineT, histT, owedNow, avail, bal] = await Promise.all([
+    read("sharesOf", [account]), read("lines", [account]), read("history", [account]), read("owed", [account]), read("available", [account]),
     reader.readContract({ address: USDC, abi: ERC20_ABI, functionName: "balanceOf", args: [account] }),
   ])
+  const line = asLine(lineT)
+  const h = asHistory(histT)
   $("my-shares").textContent = shares.toLocaleString("en")
   $("my-worth").textContent = shares > 0n ? `${usd(await read("convertToAssets", [shares]))} USDC` : "0 USDC"
-  $("my-line").textContent = line[6] > 0n ? `${usd(line[0])} USDC · ${(Number(line[3]) / 100).toFixed(2)}% · tier ${line[4]}${line[5] ? "" : " · frozen"}` : "no line"
-  $("my-owed").textContent = `${usd(owedNow[0] + owedNow[1], 6)} USDC`
+  const hasLine = line.lastAccrued > 0n
+  const owes = owedNow[0] + owedNow[1]
+  $("my-line").textContent = hasLine ? `${usd(line.limit)} USDC at ${pct(line.aprBps)}${line.active ? "" : " · frozen"}` : "No credit line yet"
+  $("my-score").textContent = hasLine ? `${line.score} / 100 · tier ${TIER[line.tier]}` : "–"
+  $("my-history").textContent = hasLine ? `${h.repayments} repayment${h.repayments === 1 ? "" : "s"} · ${h.cycles} completed cycle${h.cycles === 1 ? "" : "s"}` : "–"
+  $("my-owed").textContent = owes > 0n ? `${usd(owes, 6)} USDC` : "Nothing — you owe 0 USDC"
   $("my-avail").textContent = `${usd(avail)} USDC`
+
+  // What the next completed cycle earns, priced by the contract itself.
+  if (hasLine && line.tier < 3) {
+    const [, nextApr, nextMax] = await read("quote", [line.score, h.cycles + 1])
+    const minDraw = (line.limit + 3n) / 4n
+    $("my-next").textContent = nextApr < line.aprBps
+      ? `Borrow at least ${usd(minDraw)} USDC, keep it 7+ days, repay in full: APR drops to ${pct(nextApr)} and your line can grow to ${usd(nextMax, 0)} USDC.`
+      : `Borrow at least ${usd(minDraw)} USDC, keep it 7+ days, repay in full: your line can grow to ${usd(nextMax, 0)} USDC.`
+  } else {
+    $("my-next").textContent = ""
+  }
+
+  // Only offer what this wallet can actually do.
+  const canBorrow = line.active && avail > 0n
+  setEnabled("borrow", canBorrow, hasLine ? (line.active ? "Nothing left to draw on this line" : "Line frozen") : "Lines are opened by the underwriter after an LCRD credit check")
+  setEnabled("repay", owes > 0n, "Nothing to repay")
+  $("borrow-note").textContent = canBorrow ? "" : hasLine ? (line.active ? "Your line is fully drawn or the pool is empty." : "This line is frozen: repayments only.") : "This wallet has no credit line. Lines are opened by the underwriter after an LCRD credit check."
+  if (owes > 0n) $("repay-amt").placeholder = `up to ${usd(owes, 6)} USDC`
   $("connect").textContent = `${short(account)} · ${usd(bal)} USDC`
+  const uw = await read("underwriter")
+  $("uw-card").hidden = uw.toLowerCase() !== account.toLowerCase()
 }
 
 let refreshCount = 0
@@ -144,8 +185,23 @@ const pickProvider = () => announced.find((p) => /metamask|rabby|brave|coinbase|
 
 let provider = null
 
+const CONTRACT_ERRORS = {
+  LineInactive: "This wallet has no active credit line. Lines are opened by the underwriter after an LCRD credit check.",
+  OverLimit: "That is more than allowed: above the line when borrowing, or above the tier's maximum when opening a line.",
+  InsufficientLiquidity: "The pool does not have that much USDC available right now.",
+  NothingOwed: "This wallet has nothing to repay.",
+  InsufficientShares: "You do not have that many shares.",
+  NotUnderwriter: "Only the underwriter wallet can open or freeze lines.",
+  BadScore: "The LCRD score must be a whole number from 0 to 100.",
+  TierNotEligible: "Scores below 34 (tier C) do not qualify for an unsecured line under LCRD policy.",
+  ZeroAmount: "Enter an amount above zero.",
+  ZeroAddress: "Enter a valid wallet address.",
+}
+
 function walletError(err) {
-  if (err?.code === 4001) return "Request rejected in your wallet."
+  const name = err?.walk?.((e) => e?.data?.errorName)?.data?.errorName ?? err?.data?.errorName
+  if (name && CONTRACT_ERRORS[name]) return CONTRACT_ERRORS[name]
+  if (err?.code === 4001 || err?.cause?.code === 4001) return "Request rejected in your wallet."
   if (err?.code === -32002) return "Your wallet already has a request open. Open the wallet extension to continue."
   return err?.shortMessage ?? err?.message ?? String(err)
 }
@@ -176,8 +232,10 @@ async function connect() {
 }
 
 async function send(functionName, args, label) {
+  // Simulate first, so a revert comes back as a named contract error rather than a wallet gas-estimation failure.
+  const { request } = await reader.simulateContract({ account, address: CONTRACT, abi: POOL_ABI, functionName, args })
   status(`${label}: confirm in your wallet…`)
-  const hash = await wallet.writeContract({ address: CONTRACT, abi: POOL_ABI, functionName, args })
+  const hash = await wallet.writeContract(request)
   status(`${label}: sent ${link("tx", hash)}, waiting…`)
   await reader.waitForTransactionReceipt({ hash })
   status(`${label}: done ${link("tx", hash)}`)
@@ -200,8 +258,38 @@ const amountOf = (id) => {
 const actions = {
   async deposit() { const a = amountOf("lend-amt"); await ensureAllowance(a); await send("deposit", [a], "Deposit") },
   async withdraw() { const s = await read("sharesOf", [account]); if (!s) throw new Error("You have no shares."); await send("withdraw", [s], "Withdraw") },
-  async borrow() { await send("borrow", [amountOf("borrow-amt")], "Borrow") },
-  async repay() { const a = amountOf("repay-amt"); await ensureAllowance(a); await send("repay", [a], "Repay") },
+  async borrow() {
+    const a = amountOf("borrow-amt")
+    const line = await read("lines", [account])
+    if (!line[5]) throw new Error(CONTRACT_ERRORS.LineInactive)
+    const avail = await read("available", [account])
+    if (a > avail) throw new Error(`You can draw up to ${usd(avail)} USDC right now.`)
+    await send("borrow", [a], "Borrow")
+  },
+  async repay() {
+    const [p, i] = await read("owed", [account])
+    if (p + i === 0n) throw new Error(CONTRACT_ERRORS.NothingOwed)
+    let a = amountOf("repay-amt")
+    if (a > p + i) a = p + i + 1n // accrual between now and inclusion; the contract never takes more than is owed
+    await ensureAllowance(a)
+    await send("repay", [a], "Repay")
+  },
+  async setline() {
+    const who = $("uw-addr").value.trim()
+    if (!/^0x[0-9a-fA-F]{40}$/.test(who)) throw new Error(CONTRACT_ERRORS.ZeroAddress)
+    const score = Number($("uw-score").value)
+    if (!Number.isInteger(score) || score < 0 || score > 100) throw new Error(CONTRACT_ERRORS.BadScore)
+    const limit = amountOf("uw-limit")
+    let ref = $("uw-ref").value.trim()
+    if (!ref) ref = keccak256(toHex(`lcrd-score-report:${who.toLowerCase()}:${score}:${new Date().toISOString()}`))
+    if (!/^0x[0-9a-fA-F]{64}$/.test(ref)) throw new Error("Score reference must be a 32-byte hex hash (0x + 64 hex characters), or leave it empty.")
+    await send("setLine", [who, score, limit, ref], "Open line")
+  },
+  async freeze() {
+    const who = $("uw-addr").value.trim()
+    if (!/^0x[0-9a-fA-F]{40}$/.test(who)) throw new Error(CONTRACT_ERRORS.ZeroAddress)
+    await send("freeze", [who], "Freeze line")
+  },
 }
 
 $("connect").addEventListener("click", () => connect().catch((e) => { status(walletError(e)); banner(walletError(e)) }))
@@ -215,8 +303,23 @@ document.querySelectorAll("[data-act]").forEach((b) => b.addEventListener("click
     status(walletError(e))
   } finally {
     b.disabled = false
+    if (account) loadMe().catch(() => {}) // re-apply what this wallet can do
   }
 }))
 
 refresh()
 setInterval(refresh, 30_000)
+
+// Underwriter panel: price the score live, using the contract's own quote().
+async function previewQuote() {
+  const score = Number($("uw-score").value)
+  if (!Number.isInteger(score) || score < 0 || score > 100) { $("uw-quote").textContent = "Enter a score from 0 to 100."; return }
+  const who = $("uw-addr").value.trim()
+  const cycles = /^0x[0-9a-fA-F]{40}$/.test(who) ? asHistory(await read("history", [who])).cycles : 0
+  const [tier, apr, maxLimit] = await read("quote", [score, cycles])
+  $("uw-quote").textContent = maxLimit === 0n
+    ? `Tier ${TIER[tier]}: not eligible for an unsecured line.`
+    : `Tier ${TIER[tier]} · APR ${pct(apr)} · line up to ${usd(maxLimit, 0)} USDC${cycles ? ` (with ${cycles} completed cycle${cycles === 1 ? "" : "s"})` : ""}`
+}
+for (const id of ["uw-score", "uw-addr"]) $(id).addEventListener("input", () => previewQuote().catch(() => {}))
+previewQuote().catch(() => {})
