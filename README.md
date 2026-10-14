@@ -29,7 +29,7 @@ USDC on Arc has one balance with two views: 18 decimals natively and 6 through t
 
 ## The demo on mainnet
 
-`script/Demo.s.sol` runs a full cycle with real USDC: a lender deposits 5 USDC, the underwriter opens a 3 USDC line at 12% for a demo borrower, backed by the hash of [`docs/demo-score-report.json`](docs/demo-score-report.json) (a synthetic report, not a real person), and the borrower draws 2 USDC and repays 1, leaving a live loan that accrues interest on the page.
+`script/Demo.s.sol` runs a full cycle with real USDC: a lender deposits 3 USDC, the underwriter opens a 2 USDC line at 12% for a demo borrower, backed by the hash of [`docs/demo-score-report.json`](docs/demo-score-report.json) (a synthetic report, not a real person), and the borrower draws 1 USDC and repays 0.50, leaving a live loan that accrues interest on the page.
 
 ## Run it
 

@@ -29,16 +29,16 @@ contract Demo is Script {
         console2.logBytes32(scoreRef);
 
         vm.startBroadcast(deployerKey);
-        USDC.approve(address(pool), 5 * ONE);
-        pool.deposit(5 * ONE); // lender
-        pool.setLine(borrower, uint128(3 * ONE), 1_200, 2, scoreRef); // underwriter: 3 USDC at 12%, tier 2
-        USDC.transfer(borrower, ONE / 2); // gas money for the borrower wallet
+        USDC.approve(address(pool), 3 * ONE);
+        pool.deposit(3 * ONE); // lender
+        pool.setLine(borrower, uint128(2 * ONE), 1_200, 2, scoreRef); // underwriter: 2 USDC at 12%, tier 2
+        USDC.transfer(borrower, ONE / 10); // gas money for the borrower wallet
         vm.stopBroadcast();
 
         vm.startBroadcast(borrowerKey);
-        pool.borrow(2 * ONE);
-        USDC.approve(address(pool), ONE);
-        pool.repay(ONE);
+        pool.borrow(ONE);
+        USDC.approve(address(pool), ONE / 2);
+        pool.repay(ONE / 2);
         vm.stopBroadcast();
 
         (uint256 p, uint256 i) = pool.owed(borrower);

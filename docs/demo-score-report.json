@@ -12,5 +12,5 @@
     { "name": "cashflow_buffer", "points": 14, "max": 25 },
     { "name": "tenure", "points": 12, "max": 20 }
   ],
-  "policy": { "limitUsdc": "3.00", "aprBps": 1200 }
+  "policy": { "limitUsdc": "2.00", "aprBps": 1200 }
 }
