@@ -63,7 +63,7 @@ Borrowers request a line from the app; no human is involved:
 2. The underwriter service ([`underwriter/`](underwriter/)) checks both signatures, asks LCRD's public scoring API for the Stellar wallet's score, builds the score report (including the signed link) and hashes it.
 3. For tier A, or tier B with 55+, it calls `setLine` with its own underwriter key; anyone else is pointed to Route 1. Each Stellar wallet can back one Arc wallet, requests are rate-limited, and automatic lines are capped at 1 USDC while the pool is small.
 
-Running this unattended is safe because of the on-chain pricing: the underwriter key cannot choose an APR, exceed a tier's limit or lend to tier C, so even a compromised server can only open small lines at policy prices. The owner wallet can replace the underwriter at any time with `setUnderwriter`.
+Running this unattended is safe because of the on-chain pricing: the underwriter key cannot choose an APR, exceed a tier's limit or lend to tier C, so even a compromised server can only open small lines at policy prices. The owner wallet can replace the underwriter at any time with `setUnderwriter`. The rare manual actions (freeze a line, settle a defaulted secured line from the deposit, write off an unsecured loss, hand underwriting to another key) are in [`script/admin.sh`](script/admin.sh); the web app has no admin screen.
 
 Service: `https://172-210-243-202.sslip.io` (`GET /health`, `POST /request-line`), underwriter `0xfC767715605990035056725979B2F6B558264882`.
 

@@ -84,18 +84,6 @@
         </div>
       </div>
     </section>
-    <section class="card uw" id="uw-card" hidden>
-      <h2>Underwriter</h2>
-      <p class="hint">Visible only to the underwriter wallet. Enter the borrower's LCRD score; the contract sets the tier, APR and maximum line. The score reference is the keccak-256 hash of the score report (leave it empty to use a placeholder hash for testing).</p>
-      <div class="uw-grid">
-        <label>Borrower<input id="uw-addr" placeholder="0x…" autocomplete="off"></label>
-        <label>LCRD score (0–100)<input id="uw-score" type="number" min="0" max="100" step="1" value="71"></label>
-        <label>Limit (USDC)<input id="uw-limit" type="number" min="0" step="0.01" value="1.00"></label>
-        <label class="wide">Score reference<input id="uw-ref" placeholder="0x… (optional)" autocomplete="off"></label>
-      </div>
-      <p class="next" id="uw-quote"></p>
-      <div class="row"><button data-act="setline">Open / update line</button><button class="ghost" data-act="freeze">Freeze line</button></div>
-    </section>
     <p class="status" id="status" role="status"></p>
 
     <section>
@@ -145,6 +133,6 @@
     <span>MIT licensed · <a href="https://github.com/lucredtech/lcrd-arc-credit" target="_blank" rel="noopener">Source</a></span>
     <span>Arc mainnet · chain 5042 · USDC <code>0x3600…0000</code></span>
   </footer>
-  <script type="module" src="app.bundle.js?v=9"></script>
+  <script type="module" src="app.bundle.js?v=10"></script>
 </body>
 </html>

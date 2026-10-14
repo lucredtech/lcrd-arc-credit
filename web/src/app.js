@@ -196,8 +196,6 @@ async function loadMe() {
     ? `Your deposit: ${usd(collat)} USDC. You can borrow up to ${usd(cap)} USDC against it at ${pct(await read("securedQuote", [line.score, h.cycles]))}.`
     : "Deposit USDC in the Lend card first; then you can borrow up to 71.25% of it."
   setEnabled("secure", collat > 0n, "Deposit USDC first")
-  const uw = await read("underwriter")
-  $("uw-card").hidden = uw.toLowerCase() !== account.toLowerCase()
 }
 
 let refreshCount = 0
@@ -349,22 +347,6 @@ const actions = {
     out.innerHTML = `Approved: score ${body.score}, tier ${body.tier}. Line of ${body.limit} USDC at ${pct(body.aprBps)} opened ${link("tx", body.txHash, "on Arc")}. You can borrow now.`
     status("")
   },
-  async setline() {
-    const who = $("uw-addr").value.trim()
-    if (!/^0x[0-9a-fA-F]{40}$/.test(who)) throw new Error(CONTRACT_ERRORS.ZeroAddress)
-    const score = Number($("uw-score").value)
-    if (!Number.isInteger(score) || score < 0 || score > 100) throw new Error(CONTRACT_ERRORS.BadScore)
-    const limit = amountOf("uw-limit")
-    let ref = $("uw-ref").value.trim()
-    if (!ref) ref = keccak256(toHex(`lcrd-score-report:${who.toLowerCase()}:${score}:${new Date().toISOString()}`))
-    if (!/^0x[0-9a-fA-F]{64}$/.test(ref)) throw new Error("Score reference must be a 32-byte hex hash (0x + 64 hex characters), or leave it empty.")
-    await send("setLine", [who, score, limit, ref], "Open line")
-  },
-  async freeze() {
-    const who = $("uw-addr").value.trim()
-    if (!/^0x[0-9a-fA-F]{40}$/.test(who)) throw new Error(CONTRACT_ERRORS.ZeroAddress)
-    await send("freeze", [who], "Freeze line")
-  },
 }
 
 $("connect").addEventListener("click", () => connect().catch((e) => { status(walletError(e)); banner(walletError(e)) }))
@@ -384,17 +366,3 @@ document.querySelectorAll("[data-act]").forEach((b) => b.addEventListener("click
 
 refresh()
 setInterval(refresh, 30_000)
-
-// Underwriter panel: price the score live, using the contract's own quote().
-async function previewQuote() {
-  const score = Number($("uw-score").value)
-  if (!Number.isInteger(score) || score < 0 || score > 100) { $("uw-quote").textContent = "Enter a score from 0 to 100."; return }
-  const who = $("uw-addr").value.trim()
-  const cycles = /^0x[0-9a-fA-F]{40}$/.test(who) ? asHistory(await read("history", [who])).cycles : 0
-  const [tier, apr, maxLimit] = await read("quote", [score, cycles])
-  $("uw-quote").textContent = maxLimit === 0n
-    ? `Tier ${TIER[tier]}: not eligible for an unsecured line.`
-    : `Tier ${TIER[tier]} · APR ${pct(apr)} · line up to ${usd(maxLimit, 0)} USDC${cycles ? ` (with ${cycles} completed cycle${cycles === 1 ? "" : "s"})` : ""}`
-}
-for (const id of ["uw-score", "uw-addr"]) $(id).addEventListener("input", () => previewQuote().catch(() => {}))
-previewQuote().catch(() => {})

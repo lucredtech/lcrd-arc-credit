@@ -296,11 +296,6 @@ section > .hint { margin-bottom: var(--space-4); }
 .route h3 { display: flex; gap: var(--space-2); align-items: center; flex-wrap: wrap; }
 .route-num { display: inline-grid; place-items: center; width: 24px; height: 24px; border-radius: 8px; background: var(--gradient-accent); font-size: 12px; color: #fff; }
 
-/* ---- underwriter panel ---- */
-.uw { margin-top: var(--space-4); }
-.uw-grid { display: grid; grid-template-columns: 2fr 1fr 1fr; gap: var(--space-3); }
-.uw-grid label { display: flex; flex-direction: column; gap: 6px; font-size: var(--text-label); text-transform: uppercase; letter-spacing: 0.05em; color: var(--color-text-secondary); }
-.uw-grid .wide { grid-column: 1 / -1; }
 
 /* ---- how it works ---- */
 .how { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--space-4); }
@@ -359,7 +354,6 @@ td.empty { color: var(--color-text-secondary); text-align: center; padding: var(
 
 @media (max-width: 860px) {
   .grid2, .routes, .how { grid-template-columns: 1fr; }
-  .uw-grid { grid-template-columns: 1fr 1fr; }
 }
 @media (max-width: 560px) {
   .brand { white-space: nowrap; font-size: var(--text-body-sm); gap: var(--space-2); }
