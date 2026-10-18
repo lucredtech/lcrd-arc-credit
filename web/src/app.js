@@ -1,4 +1,4 @@
-import { createPublicClient, createWalletClient, custom, fallback, formatUnits, http, keccak256, parseAbi, parseUnits, toHex } from "viem"
+import { createPublicClient, createWalletClient, custom, fallback, formatUnits, http, keccak256, parseAbi, parseEventLogs, parseUnits, toHex } from "viem"
 import { arc } from "viem/chains"
 import { CONTRACT, DEPLOY_BLOCK, UNDERWRITER_API } from "./config.js"
 import { isConnected as freighterConnected, requestAccess as freighterAccess, signMessage as freighterSign } from "@stellar/freighter-api"
@@ -118,15 +118,25 @@ async function loadLines() {
 }
 
 async function loadActivity() {
-  const latest = await reader.getBlockNumber()
-  const logs = []
-  // Query in windows so a long-lived pool does not hit RPC range limits.
-  for (let from = BigInt(DEPLOY_BLOCK); from <= latest; from += 50_000n) {
-    const to = from + 49_999n < latest ? from + 49_999n : latest
-    logs.push(...(await reader.getContractEvents({ address: CONTRACT, abi: POOL_ABI, fromBlock: from, toBlock: to })))
+  // Arc's RPC allows 10,000 blocks per log query, so the full history comes from the
+  // underwriter service's index of the pool; if that is unavailable, show the last 10,000 blocks.
+  let logs
+  let recentOnly = false
+  try {
+    const res = await fetch(`${UNDERWRITER_API}/activity`, { cache: "no-store" })
+    if (!res.ok) throw new Error(`activity: HTTP ${res.status}`)
+    const body = await res.json()
+    if (body.pool?.toLowerCase() !== CONTRACT.toLowerCase()) throw new Error("activity index is for another pool")
+    logs = parseEventLogs({ abi: POOL_ABI, logs: body.logs.map((l) => ({ ...l, address: CONTRACT, blockNumber: BigInt(l.blockNumber) })) })
+  } catch (err) {
+    console.warn("activity index unavailable, scanning recent blocks:", err.message)
+    recentOnly = true
+    const latest = await reader.getBlockNumber()
+    const from = latest - 9_999n > BigInt(DEPLOY_BLOCK) ? latest - 9_999n : BigInt(DEPLOY_BLOCK)
+    logs = await reader.getContractEvents({ address: CONTRACT, abi: POOL_ABI, fromBlock: from, toBlock: latest })
   }
   const body = $("activity").querySelector("tbody")
-  if (!logs.length) { body.innerHTML = `<tr><td colspan="5" class="empty">No activity yet.</td></tr>`; return }
+  if (!logs.length) { body.innerHTML = `<tr><td colspan="5" class="empty">${recentOnly ? "Full history is temporarily unavailable; no activity in the last 10,000 blocks." : "No activity yet."}</td></tr>`; return }
   body.innerHTML = logs.reverse().slice(0, 25).map((e) => {
     const a = e.args
     const who = a.lender ?? a.borrower

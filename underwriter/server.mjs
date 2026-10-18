@@ -145,6 +145,33 @@ async function relay(raw) {
   throw lastErr ?? new Error("no upstream")
 }
 
+// ---- pool activity index ----
+// Arc's RPC allows at most 10,000 blocks per eth_getLogs. Rather than every visitor
+// scanning the pool's whole history, this keeps an index of the pool's logs:
+// it catches up in 10,000-block windows, then follows the chain every 15 s.
+const LOG_WINDOW = 10_000n
+const ACTIVITY_FILE = path.join(DATA_DIR, "activity.json")
+const activity = fs.existsSync(ACTIVITY_FILE) ? JSON.parse(fs.readFileSync(ACTIVITY_FILE, "utf8")) : { pool: POOL, scannedTo: env("POOL_DEPLOY_BLOCK", "0"), logs: [] }
+if (activity.pool !== POOL) Object.assign(activity, { pool: POOL, scannedTo: env("POOL_DEPLOY_BLOCK", "0"), logs: [] })
+async function indexActivity() {
+  const latest = await reader.getBlockNumber()
+  let from = BigInt(activity.scannedTo) + 1n
+  while (from <= latest) {
+    const to = from + LOG_WINDOW - 1n < latest ? from + LOG_WINDOW - 1n : latest
+    const logs = await reader.request({ method: "eth_getLogs", params: [{ address: POOL, fromBlock: toHex(from), toBlock: toHex(to) }] })
+    for (const l of logs) activity.logs.push({ blockNumber: l.blockNumber, transactionHash: l.transactionHash, logIndex: l.logIndex, topics: l.topics, data: l.data })
+    activity.scannedTo = to.toString()
+    from = to + 1n
+  }
+  fs.writeFileSync(ACTIVITY_FILE, JSON.stringify(activity))
+}
+let indexing = false
+async function indexLoop() {
+  if (indexing) return
+  indexing = true
+  try { await indexActivity() } catch (e) { console.error(new Date().toISOString(), "activity index:", e.shortMessage ?? e.message) } finally { indexing = false }
+}
+
 const recent = new Map() // ip -> [timestamps]
 function rateLimited(ip) {
   const now = Date.now()
@@ -230,6 +257,9 @@ const server = http.createServer(async (req, res) => {
       const uw = await reader.readContract({ address: POOL, abi: POOL_ABI, functionName: "underwriter" })
       return send(res, 200, { ok: true, pool: POOL, underwriter: account.address, active: uw.toLowerCase() === account.address.toLowerCase(), autoMaxLimitUsdc: Number(AUTO_MAX_LIMIT) / 1e6 }, origin)
     }
+    if (req.method === "GET" && req.url === "/activity") {
+      return send(res, 200, { pool: POOL, scannedTo: activity.scannedTo, logs: activity.logs.slice(-100) }, origin)
+    }
     if (req.method === "POST" && req.url === "/chain") {
       if (relayLimited(ip)) return send(res, 429, { jsonrpc: "2.0", id: null, error: { code: -32005, message: "rate limited" } }, origin)
       let raw = ""
@@ -256,4 +286,5 @@ const server = http.createServer(async (req, res) => {
 })
 
 if (!isAddress(POOL)) throw new Error("POOL is not set")
+if (env("PORT") !== "0") { indexLoop(); setInterval(indexLoop, 15_000) }
 if (env("PORT") !== "0") server.listen(Number(env("PORT", 8080)), () => console.log(`underwriter ${account.address} for pool ${POOL} on :${env("PORT", 8080)}`))
