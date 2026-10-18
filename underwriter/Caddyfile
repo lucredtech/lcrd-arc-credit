@@ -1,4 +1,6 @@
-# sslip.io resolves the name to the VM's IP, so Caddy can get a real certificate without DNS changes.
-172-210-243-202.sslip.io {
+# Standalone setup: set UW_DOMAIN to <your-ip-with-dashes>.sslip.io so Caddy can get a
+# real Let's Encrypt certificate without DNS changes. (In production the service sits
+# behind a shared Caddy as arc-34-57-119-191.sslip.io.)
+{$UW_DOMAIN} {
 	reverse_proxy underwriter:8080
 }

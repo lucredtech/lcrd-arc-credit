@@ -65,7 +65,7 @@ Borrowers request a line from the app; no human is involved:
 
 Running this unattended is safe because of the on-chain pricing: the underwriter key cannot choose an APR, exceed a tier's limit or lend to tier C, so even a compromised server can only open small lines at policy prices. The owner wallet can replace the underwriter at any time with `setUnderwriter`. The rare manual actions (freeze a line, settle a defaulted secured line from the deposit, write off an unsecured loss, hand underwriting to another key) are in [`script/admin.sh`](script/admin.sh); the web app has no admin screen.
 
-Service: `https://172-210-243-202.sslip.io` (`GET /health`, `POST /request-line`), underwriter `0xfC767715605990035056725979B2F6B558264882`.
+Service: `https://arc-34-57-119-191.sslip.io` (`GET /health`, `POST /request-line`, and `POST /chain`, a read-only Arc RPC relay the app uses because Brave Shields blocks the public Arc RPC endpoints), underwriter `0xfC767715605990035056725979B2F6B558264882`. It runs as a container behind a shared Caddy on a GCP VM; `underwriter/docker-compose.yml` is a standalone setup for a dedicated host.
 
 ### Lenders
 
